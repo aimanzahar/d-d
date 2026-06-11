@@ -1,4 +1,5 @@
-import { internalAction } from "./_generated/server";
+import { internalAction, internalMutation } from "./_generated/server";
+import { v } from "convex/values";
 
 // Phase 0 smoke test: validates every external integration from inside the
 // Convex V8 runtime (the same runtime the GM loop will run in).
@@ -197,5 +198,30 @@ export const run = internalAction({
     }
 
     return results;
+  },
+});
+
+// Test helper: simulate a crashed GM turn (stale lock + orphaned stream).
+export const simulateCrashedGm = internalMutation({
+  args: { campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign) return "no campaign";
+    await ctx.db.patch(args.campaignId, {
+      gm: {
+        status: "running",
+        startedAt: Date.now() - 10 * 60 * 1000, // 10 min ago = very stale
+        generation: campaign.gm.generation + 1,
+      },
+    });
+    const orphanId = await ctx.db.insert("messages", {
+      campaignId: args.campaignId,
+      kind: "gm",
+      content: "The torchlight flickers as",
+      status: "streaming",
+      ooc: false,
+      processed: true,
+    });
+    return { orphanId, generation: campaign.gm.generation + 1 };
   },
 });

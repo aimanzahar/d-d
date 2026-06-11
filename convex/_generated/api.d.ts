@@ -9,13 +9,23 @@
  */
 
 import type * as campaigns from "../campaigns.js";
+import type * as characterOps from "../characterOps.js";
 import type * as characters from "../characters.js";
+import type * as crons from "../crons.js";
+import type * as dice from "../dice.js";
+import type * as gm_context from "../gm/context.js";
+import type * as gm_prompt from "../gm/prompt.js";
+import type * as gm_tools from "../gm/tools.js";
+import type * as gm_turn from "../gm/turn.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_dice from "../lib/dice.js";
 import type * as lib_llm from "../lib/llm.js";
 import type * as lib_qdrant from "../lib/qdrant.js";
 import type * as lib_rules5e from "../lib/rules5e.js";
+import type * as messages from "../messages.js";
 import type * as players from "../players.js";
 import type * as presence from "../presence.js";
+import type * as questFlags from "../questFlags.js";
 import type * as seed from "../seed.js";
 import type * as smoke from "../smoke.js";
 import type * as srd_choice from "../srd/choice.js";
@@ -30,13 +40,23 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   campaigns: typeof campaigns;
+  characterOps: typeof characterOps;
   characters: typeof characters;
+  crons: typeof crons;
+  dice: typeof dice;
+  "gm/context": typeof gm_context;
+  "gm/prompt": typeof gm_prompt;
+  "gm/tools": typeof gm_tools;
+  "gm/turn": typeof gm_turn;
   "lib/auth": typeof lib_auth;
+  "lib/dice": typeof lib_dice;
   "lib/llm": typeof lib_llm;
   "lib/qdrant": typeof lib_qdrant;
   "lib/rules5e": typeof lib_rules5e;
+  messages: typeof messages;
   players: typeof players;
   presence: typeof presence;
+  questFlags: typeof questFlags;
   seed: typeof seed;
   smoke: typeof smoke;
   "srd/choice": typeof srd_choice;

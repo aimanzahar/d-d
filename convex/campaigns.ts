@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { newInviteCode, newToken, requireHost, requirePlayer } from "./lib/auth";
+import { enqueueGm } from "./messages";
 
 const MAX_PLAYERS = 6;
 
@@ -117,6 +118,48 @@ export const get = query({
       gmStatus: campaign.gm.status,
       activeCombatId: campaign.activeCombatId ?? null,
     };
+  },
+});
+
+// Host starts the game: every seated player needs a forged hero.
+export const startAdventure = mutation({
+  args: { sessionToken: v.string(), campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    await requireHost(ctx, args.sessionToken, args.campaignId);
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign) throw new ConvexError({ code: "campaign_not_found" });
+    if (campaign.status !== "lobby") throw new ConvexError({ code: "campaign_started" });
+
+    const players = await ctx.db
+      .query("players")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .collect();
+    if (players.length === 0 || players.some((p) => !p.characterId)) {
+      throw new ConvexError({ code: "party_not_ready" });
+    }
+
+    await ctx.db.patch(args.campaignId, { status: "active" });
+    // Kickoff: an unprocessed system message is the GM's first work item.
+    // ooc:true marks it as a GM directive — hidden from the player feed.
+    await ctx.db.insert("messages", {
+      campaignId: args.campaignId,
+      kind: "system",
+      content:
+        "The campaign begins NOW. Open the adventure: establish the starting location with change_location, set the scene vividly from the premise, introduce each party member as present, and end with a hook that demands a decision.",
+      status: "complete",
+      ooc: true,
+      processed: false,
+    });
+    await enqueueGm(ctx, args.campaignId);
+  },
+});
+
+// Retry after a GM error: wakes the GM if idle.
+export const retryGm = mutation({
+  args: { sessionToken: v.string(), campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    await requirePlayer(ctx, args.sessionToken, args.campaignId);
+    await enqueueGm(ctx, args.campaignId);
   },
 });
 

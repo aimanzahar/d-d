@@ -50,6 +50,15 @@ export function LobbyScreen() {
     campaignId: session.campaignId,
   });
   const reissue = useMutation(api.campaigns.reissueToken);
+  const startAdventure = useMutation(api.campaigns.startAdventure);
+  const [starting, setStarting] = useState(false);
+
+  // Everyone follows the host into the game when the campaign goes live
+  useEffect(() => {
+    if (session.campaignStatus === "active") {
+      router.replace(`/c/${session.inviteCode}/play`);
+    }
+  }, [session.campaignStatus, router, session.inviteCode]);
   const presenceState = usePresence(
     api.presence,
     session.campaignId,
@@ -186,8 +195,25 @@ export function LobbyScreen() {
 
       {session.isHost && (
         <div className="lobby-rise flex flex-col items-center gap-2 opacity-0">
-          <Button variant="ember" size="lg" disabled={!everyoneReady} title={everyoneReady ? undefined : "Every hero must be forged before the tale begins"}>
-            Begin the adventure
+          <Button
+            variant="ember"
+            size="lg"
+            disabled={!everyoneReady || starting}
+            title={everyoneReady ? undefined : "Every hero must be forged before the tale begins"}
+            onClick={async () => {
+              setStarting(true);
+              try {
+                await startAdventure({
+                  sessionToken: session.sessionToken,
+                  campaignId: session.campaignId,
+                });
+                router.push(`/c/${session.inviteCode}/play`);
+              } catch {
+                setStarting(false);
+              }
+            }}
+          >
+            {starting ? "Lighting the candles…" : "Begin the adventure"}
           </Button>
           {!everyoneReady && (
             <p className="font-narrative italic text-xs text-parchment-faint">
