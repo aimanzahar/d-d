@@ -19,6 +19,7 @@ import type * as gm_memory from "../gm/memory.js";
 import type * as gm_prompt from "../gm/prompt.js";
 import type * as gm_tools from "../gm/tools.js";
 import type * as gm_turn from "../gm/turn.js";
+import type * as images from "../images.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_battleMaps from "../lib/battleMaps.js";
 import type * as lib_dice from "../lib/dice.js";
@@ -54,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   "gm/prompt": typeof gm_prompt;
   "gm/tools": typeof gm_tools;
   "gm/turn": typeof gm_turn;
+  images: typeof images;
   "lib/auth": typeof lib_auth;
   "lib/battleMaps": typeof lib_battleMaps;
   "lib/dice": typeof lib_dice;

@@ -116,6 +116,7 @@ async function publicRoll(
     advantage: "normal",
     visibility: "public",
     status: "rolled",
+    rolledAt: Date.now(),
     notation: args.outcome!.notation,
     dice: args.outcome!.dice,
     modifier: args.outcome!.modifier,

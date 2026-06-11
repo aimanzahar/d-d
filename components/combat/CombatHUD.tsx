@@ -1,13 +1,18 @@
 "use client";
 
+// Combat chrome: initiative strip, turn banner, action bar. The battlefield
+// itself renders in 3D inside the stage canvas; this component drives the
+// targeting state the 3D map consumes (via the game store).
+
 import { animate } from "animejs";
 import { useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { useSession } from "@/hooks/useSession";
+import { endableCells, key, reachableCells } from "@/convex/lib/grid";
+import { useGameStore, type TargetMode } from "@/stores/gameStore";
 import { Button } from "@/components/ui/Button";
-import { BattleMap2D, type TargetMode } from "./BattleMap2D";
 
 export function CombatHUD() {
   const session = useSession();
@@ -36,27 +41,32 @@ export function CombatHUD() {
 
   const active = combat?.initiative[combat.activeIndex];
   const isMyTurn = !!combat && active?.refId === String(session.characterId);
+  const me = party?.find((c) => String(c._id) === String(session.characterId));
 
-  // Turn banner sweep on every turn change
-  useEffect(() => {
-    if (!active || active.name === lastActive.current) return;
-    lastActive.current = active.name;
-    setMode(null);
-    if (bannerRef.current) {
-      animate(bannerRef.current, {
-        opacity: [0, 1, 1, 0],
-        translateX: [-40, 0, 0, 40],
-        duration: 1800,
-        ease: "inOut(2)",
-      });
+  // Movement-range (client mirror of the server validation)
+  const reachable = useMemo(() => {
+    if (mode !== "move" || !me?.position || !isMyTurn || !combat) {
+      return new Map<string, number>();
     }
-  }, [active]);
-
-  if (!combat || !party) return null;
-
-  const incapacitated = myCharacter?.conditions.some((c) =>
-    ["unconscious", "dead", "stable"].includes(c.name),
-  );
+    const blockers = new Set(
+      combat.monsters.filter((m) => !m.isDead).map((m) => key(m.position)),
+    );
+    const passThrough = new Set(
+      (party ?? [])
+        .filter((c) => String(c._id) !== String(session.characterId) && c.position)
+        .map((c) => key(c.position!)),
+    );
+    const reach = reachableCells({
+      terrain: combat.map.terrain,
+      width: combat.map.width,
+      height: combat.map.height,
+      start: me.position,
+      budgetFeet: me.speed - combat.turnState.movementUsed,
+      blockers,
+      passThrough,
+    });
+    return endableCells(reach, passThrough);
+  }, [mode, me, isMyTurn, combat, party, session.characterId]);
 
   async function guard<T>(fn: () => Promise<T>) {
     setError(null);
@@ -79,6 +89,61 @@ export function CombatHUD() {
     }
   }
 
+  // Push targeting state + handlers into the store for the 3D map
+  useEffect(() => {
+    const onCellClick = (x: number, y: number) => {
+      if (mode === "move") {
+        void guard(() => move({ sessionToken: session.sessionToken, toX: x, toY: y })).then(() =>
+          setMode(null),
+        );
+      } else if (mode === "spell-aoe" && spellIndex) {
+        void guard(() =>
+          castSpell({ sessionToken: session.sessionToken, spellIndex, originX: x, originY: y }),
+        ).then(() => setMode(null));
+      }
+    };
+    const onMonsterClick = (label: string) => {
+      if (mode === "attack") {
+        void guard(() => attack({ sessionToken: session.sessionToken, targetLabel: label })).then(
+          () => setMode(null),
+        );
+      } else if (mode === "spell-target" && spellIndex) {
+        void guard(() =>
+          castSpell({ sessionToken: session.sessionToken, spellIndex, targetLabel: label }),
+        ).then(() => setMode(null));
+      }
+    };
+    useGameStore.getState().setTargeting(mode, reachable, onCellClick, onMonsterClick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, reachable, spellIndex, session.sessionToken]);
+
+  // Clear targeting when the HUD unmounts (combat over)
+  useEffect(
+    () => () => useGameStore.getState().setTargeting(null, new Map(), null, null),
+    [],
+  );
+
+  // Turn banner sweep
+  useEffect(() => {
+    if (!active || active.name === lastActive.current) return;
+    lastActive.current = active.name;
+    setMode(null);
+    if (bannerRef.current) {
+      animate(bannerRef.current, {
+        opacity: [0, 1, 1, 0],
+        translateX: [-40, 0, 0, 40],
+        duration: 1800,
+        ease: "inOut(2)",
+      });
+    }
+  }, [active]);
+
+  if (!combat || !party) return null;
+
+  const incapacitated = myCharacter?.conditions.some((c) =>
+    ["unconscious", "dead", "stable"].includes(c.name),
+  );
+
   const spells = myCharacter?.spellcasting
     ? [
         ...myCharacter.spellcasting.cantrips.map((s) => ({ index: s, cantrip: true })),
@@ -87,7 +152,7 @@ export function CombatHUD() {
     : [];
 
   return (
-    <div className="border-b border-gold-dim/30 bg-ink-soft/60">
+    <div className="pointer-events-auto bg-ink-soft/75 backdrop-blur border-b border-gold-dim/30">
       {/* initiative strip */}
       <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto">
         <span className="font-display text-[0.6rem] tracking-[0.25em] uppercase text-blood shrink-0 mr-1">
@@ -131,38 +196,12 @@ export function CombatHUD() {
       </div>
 
       {/* turn banner */}
-      <div ref={bannerRef} className="text-center font-display text-sm tracking-[0.3em] uppercase text-gold py-0.5 opacity-0 pointer-events-none">
+      <div
+        ref={bannerRef}
+        className="text-center font-display text-sm tracking-[0.3em] uppercase text-gold py-0.5 opacity-0 pointer-events-none"
+      >
         {active ? `${active.name}'s turn` : ""}
       </div>
-
-      <BattleMap2D
-        combat={combat}
-        party={party}
-        myCharacterId={session.characterId ? String(session.characterId) : null}
-        mode={mode}
-        onCellClick={(x, y) => {
-          if (mode === "move") {
-            void guard(() => move({ sessionToken: session.sessionToken, toX: x, toY: y })).then(() =>
-              setMode(null),
-            );
-          } else if (mode === "spell-aoe" && spellIndex) {
-            void guard(() =>
-              castSpell({ sessionToken: session.sessionToken, spellIndex, originX: x, originY: y }),
-            ).then(() => setMode(null));
-          }
-        }}
-        onMonsterClick={(label) => {
-          if (mode === "attack") {
-            void guard(() => attack({ sessionToken: session.sessionToken, targetLabel: label })).then(() =>
-              setMode(null),
-            );
-          } else if (mode === "spell-target" && spellIndex) {
-            void guard(() =>
-              castSpell({ sessionToken: session.sessionToken, spellIndex, targetLabel: label }),
-            ).then(() => setMode(null));
-          }
-        }}
-      />
 
       {/* action bar */}
       {isMyTurn && !incapacitated && (
@@ -172,7 +211,7 @@ export function CombatHUD() {
             size="sm"
             onClick={() => setMode(mode === "move" ? null : "move")}
           >
-            Move ({myCharacter ? myCharacter.speed - combat.turnState.movementUsed : 0} ft)
+            Move ({me ? me.speed - combat.turnState.movementUsed : 0} ft)
           </Button>
           <Button
             variant={mode === "attack" ? "ember" : "gold"}
@@ -192,7 +231,8 @@ export function CombatHUD() {
                 <option value="">— spell —</option>
                 {spells.map((s) => (
                   <option key={s.index} value={s.index}>
-                    {s.index.replace(/-/g, " ")}{s.cantrip ? " ◦" : ""}
+                    {s.index.replace(/-/g, " ")}
+                    {s.cantrip ? " ◦" : ""}
                   </option>
                 ))}
               </select>
@@ -201,7 +241,7 @@ export function CombatHUD() {
                 size="sm"
                 disabled={!spellIndex || combat.turnState.actionUsed}
                 onClick={() => setMode(mode?.startsWith("spell") ? null : "spell-target")}
-                title="Click a monster (or switch to area mode)"
+                title="Click a monster on the battlefield (or switch to area mode)"
               >
                 Cast
               </Button>
@@ -239,9 +279,9 @@ export function CombatHUD() {
       )}
       {isMyTurn && mode && (
         <p className="px-3 pb-2 font-narrative italic text-xs text-arcane-soft">
-          {mode === "move" && "Click a highlighted cell to move."}
-          {mode === "attack" && "Click an enemy token to strike."}
-          {mode === "spell-target" && "Click an enemy token to cast."}
+          {mode === "move" && "Click a highlighted cell on the battlefield to move."}
+          {mode === "attack" && "Click an enemy on the battlefield to strike."}
+          {mode === "spell-target" && "Click an enemy on the battlefield to cast."}
           {mode === "spell-aoe" && "Click the center cell for the area effect."}
         </p>
       )}

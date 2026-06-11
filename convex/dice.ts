@@ -56,6 +56,7 @@ export async function fulfillCore(
 
   await ctx.db.patch(roll._id, {
     status: "rolled",
+    rolledAt: Date.now(),
     notation: outcome.notation,
     dice: outcome.dice,
     modifier,
@@ -180,6 +181,7 @@ export const freeRoll = mutation({
       advantage: args.advantage,
       visibility: "public",
       status: "rolled",
+      rolledAt: Date.now(),
       notation: outcome.notation,
       dice: outcome.dice,
       modifier,
@@ -220,6 +222,7 @@ export const createNotationRoll = internalMutation({
       advantage: "normal",
       visibility: args.visibility,
       status: "rolled",
+      rolledAt: Date.now(),
       notation: outcome.notation,
       dice: outcome.dice,
       modifier: outcome.modifier,
@@ -318,5 +321,31 @@ export const autoFulfillIfPending = internalMutation({
     const character = await ctx.db.get(args.characterId);
     if (!character) return;
     await fulfillCore(ctx, roll, character, " (auto)");
+  },
+});
+
+// Recent resolved public rolls — the 3D dice animation feed.
+export const recentRolls = query({
+  args: { sessionToken: v.string(), campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    await requirePlayer(ctx, args.sessionToken, args.campaignId);
+    const rolls = await ctx.db
+      .query("rolls")
+      .withIndex("by_campaign_status", (q) =>
+        q.eq("campaignId", args.campaignId).eq("status", "rolled"),
+      )
+      .order("desc")
+      .take(6);
+    return rolls
+      .filter((r) => r.visibility === "public" && r.dice)
+      .map((r) => ({
+        rollId: String(r._id),
+        actorName: r.actorName,
+        purpose: r.context ?? r.purpose,
+        dice: r.dice!,
+        total: r.total ?? 0,
+        crit: r.crit,
+        at: r.rolledAt ?? r._creationTime,
+      }));
   },
 });

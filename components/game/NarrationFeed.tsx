@@ -75,6 +75,24 @@ export function NarrationFeed() {
                 )}
               </div>
             );
+          case "image":
+            return (
+              <figure key={m._id} className="flex flex-col items-center gap-1.5 py-2">
+                {m.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={m.imageUrl}
+                    alt={m.content}
+                    className="max-w-[480px] w-full border border-gold-dim/40 shadow-[0_0_40px_rgba(201,164,92,0.12)]"
+                  />
+                ) : (
+                  <div className="w-full max-w-[480px] h-40 border border-gold-dim/30 bg-ink-raise/40 animate-flicker" />
+                )}
+                <figcaption className="font-narrative italic text-xs text-parchment-faint">
+                  {m.content}
+                </figcaption>
+              </figure>
+            );
           case "system":
             if (m.ooc) return null; // GM-directive system messages are not for players
             return (

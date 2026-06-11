@@ -237,6 +237,7 @@ export default defineSchema({
     dc: v.optional(v.number()), // stripped from public queries until rolled
     visibility: v.union(v.literal("public"), v.literal("secret")),
     status: v.union(v.literal("pending"), v.literal("rolled")),
+    rolledAt: v.optional(v.number()), // when the dice actually landed
     notation: v.optional(v.string()), // '1d20+5'
     dice: v.optional(
       v.array(

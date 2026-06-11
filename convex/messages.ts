@@ -5,6 +5,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { requirePlayer } from "./lib/auth";
+import { publicStorageUrl } from "./images";
 
 const GM_STALE_MS = 120_000;
 
@@ -42,16 +43,19 @@ export const list = query({
       .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
       .order("desc")
       .paginate(args.paginationOpts);
-    // Join roll docs (with DC stripped while pending)
+    // Join roll docs (with DC stripped while pending) and image URLs
     const items = await Promise.all(
       page.page.map(async (m) => {
         const roll = m.rollId ? await ctx.db.get(m.rollId) : null;
+        const image = m.imageId ? await ctx.db.get(m.imageId) : null;
+        const rawUrl = image?.storageId ? await ctx.storage.getUrl(image.storageId) : null;
         return {
           ...m,
           roll:
             roll && roll.visibility === "public"
               ? { ...roll, dc: roll.status === "rolled" ? roll.dc : undefined }
               : null,
+          imageUrl: rawUrl ? publicStorageUrl(rawUrl) : null,
         };
       }),
     );
