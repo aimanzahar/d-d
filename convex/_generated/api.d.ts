@@ -11,6 +11,7 @@
 import type * as campaigns from "../campaigns.js";
 import type * as characterOps from "../characterOps.js";
 import type * as characters from "../characters.js";
+import type * as combat from "../combat.js";
 import type * as crons from "../crons.js";
 import type * as dice from "../dice.js";
 import type * as gm_context from "../gm/context.js";
@@ -19,7 +20,9 @@ import type * as gm_prompt from "../gm/prompt.js";
 import type * as gm_tools from "../gm/tools.js";
 import type * as gm_turn from "../gm/turn.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_battleMaps from "../lib/battleMaps.js";
 import type * as lib_dice from "../lib/dice.js";
+import type * as lib_grid from "../lib/grid.js";
 import type * as lib_llm from "../lib/llm.js";
 import type * as lib_qdrant from "../lib/qdrant.js";
 import type * as lib_rules5e from "../lib/rules5e.js";
@@ -43,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   campaigns: typeof campaigns;
   characterOps: typeof characterOps;
   characters: typeof characters;
+  combat: typeof combat;
   crons: typeof crons;
   dice: typeof dice;
   "gm/context": typeof gm_context;
@@ -51,7 +55,9 @@ declare const fullApi: ApiFromModules<{
   "gm/tools": typeof gm_tools;
   "gm/turn": typeof gm_turn;
   "lib/auth": typeof lib_auth;
+  "lib/battleMaps": typeof lib_battleMaps;
   "lib/dice": typeof lib_dice;
+  "lib/grid": typeof lib_grid;
   "lib/llm": typeof lib_llm;
   "lib/qdrant": typeof lib_qdrant;
   "lib/rules5e": typeof lib_rules5e;

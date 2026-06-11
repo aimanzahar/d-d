@@ -191,6 +191,118 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     type: "function",
     function: {
+      name: "start_combat",
+      description:
+        "Begin tactical combat. The engine builds the battle map, spawns SRD monsters, rolls EVERYONE's initiative, and reports the order. Use when violence erupts.",
+      parameters: {
+        type: "object",
+        properties: {
+          mapPreset: {
+            type: "string",
+            enum: ["forest_clearing", "dungeon_chamber", "cave_hollow", "road_ambush", "town_square", "open_field"],
+            description: "Battlefield; omit to match the current scene",
+          },
+          monsters: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                srdIndex: { type: "string", description: "SRD monster index, e.g. 'goblin', 'wolf', 'skeleton', 'bandit'" },
+                count: { type: "integer", minimum: 1, maximum: 8 },
+              },
+              required: ["srdIndex", "count"],
+            },
+          },
+        },
+        required: ["monsters"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "npc_attack",
+      description:
+        "A monster attacks a character. The engine resolves everything (d20 vs AC with condition modifiers, crits, damage, dropping to 0 HP) — narrate from the returned result.",
+      parameters: {
+        type: "object",
+        properties: {
+          attackerLabel: { type: "string", description: "Monster label, e.g. 'Goblin 2'" },
+          targetName: { type: "string", description: "Character name" },
+          attackName: { type: "string", description: "Attack from its stat block, e.g. 'Scimitar' — omit for its first attack" },
+        },
+        required: ["attackerLabel", "targetName"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "move_token",
+      description: "Move a combatant on the battle map. Monster moves are validated against speed; use forced=true only for shoves/teleports.",
+      parameters: {
+        type: "object",
+        properties: {
+          entityType: { type: "string", enum: ["monster", "character"] },
+          name: { type: "string" },
+          toX: { type: "integer" },
+          toY: { type: "integer" },
+          forced: { type: "boolean" },
+        },
+        required: ["entityType", "name", "toX", "toY"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "advance_turn",
+      description: "End the current monster's turn. Returns who acts next. NEVER call this on a player's turn — players end their own turns.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "end_combat",
+      description: "End the battle when one side is defeated, flees, or surrenders. Then award_xp (the result tells you the defeated XP total).",
+      parameters: {
+        type: "object",
+        properties: {
+          outcome: { type: "string", enum: ["victory", "defeat", "fled", "negotiated"] },
+          summary: { type: "string", description: "One sentence for the log" },
+        },
+        required: ["outcome", "summary"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "spawn_monsters",
+      description: "Reinforcements join an ongoing combat.",
+      parameters: {
+        type: "object",
+        properties: {
+          monsters: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                srdIndex: { type: "string" },
+                count: { type: "integer", minimum: 1, maximum: 6 },
+              },
+              required: ["srdIndex", "count"],
+            },
+          },
+        },
+        required: ["monsters"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "lookup_srd",
       description: "Fetch an exact SRD record when you need real numbers: a monster stat block, spell, or item.",
       parameters: {
@@ -448,6 +560,58 @@ export async function dispatchTool(
         slotLevel,
       });
     }
+
+    case "start_combat":
+      return await ctx.runMutation(internal.combat.toolStartCombat, {
+        campaignId,
+        mapPreset: typeof args.mapPreset === "string" ? args.mapPreset : undefined,
+        monsters: Array.isArray(args.monsters)
+          ? args.monsters.map((m: any) => ({
+              srdIndex: String(m.srdIndex ?? ""),
+              count: Math.max(1, Math.round(Number(m.count) || 1)),
+            }))
+          : [],
+        surprised: Array.isArray(args.surprised) ? args.surprised.map(String) : undefined,
+      });
+
+    case "npc_attack":
+      return await ctx.runMutation(internal.combat.toolNpcAttack, {
+        campaignId,
+        attackerLabel: String(args.attackerLabel ?? ""),
+        targetName: String(args.targetName ?? ""),
+        attackName: typeof args.attackName === "string" ? args.attackName : undefined,
+      });
+
+    case "move_token":
+      return await ctx.runMutation(internal.combat.toolMoveToken, {
+        campaignId,
+        entityType: args.entityType === "character" ? "character" : "monster",
+        name: String(args.name ?? ""),
+        toX: Math.round(Number(args.toX)),
+        toY: Math.round(Number(args.toY)),
+        forced: args.forced === true,
+      });
+
+    case "advance_turn":
+      return await ctx.runMutation(internal.combat.toolAdvanceTurn, { campaignId });
+
+    case "end_combat":
+      return await ctx.runMutation(internal.combat.toolEndCombat, {
+        campaignId,
+        outcome: String(args.outcome ?? "victory"),
+        summary: String(args.summary ?? "").slice(0, 300),
+      });
+
+    case "spawn_monsters":
+      return await ctx.runMutation(internal.combat.toolSpawnMonsters, {
+        campaignId,
+        monsters: Array.isArray(args.monsters)
+          ? args.monsters.map((m: any) => ({
+              srdIndex: String(m.srdIndex ?? ""),
+              count: Math.max(1, Math.round(Number(m.count) || 1)),
+            }))
+          : [],
+      });
 
     case "lookup_srd":
       return await ctx.runQuery(internal.gm.tools.getSrdRecord, {

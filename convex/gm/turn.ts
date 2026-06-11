@@ -5,7 +5,7 @@ import { internal } from "../_generated/api";
 import { internalAction, internalMutation } from "../_generated/server";
 import { chatStream, embed, type ChatMessage, type ToolCall } from "../lib/llm";
 import { search } from "../lib/qdrant";
-import { BASE_PROMPT, EXPLORATION_ADDENDUM } from "./prompt";
+import { BASE_PROMPT, COMBAT_ADDENDUM, EXPLORATION_ADDENDUM } from "./prompt";
 import { dispatchTool, TOOL_DEFS } from "./tools";
 
 const MAX_ITERATIONS = 6;
@@ -116,8 +116,9 @@ export const respond = internalAction({
         console.error("RAG degraded to empty:", error);
       }
 
+      const addendum = context.mode === "combat" ? COMBAT_ADDENDUM : EXPLORATION_ADDENDUM;
       const transcript: ChatMessage[] = [
-        { role: "system", content: `${BASE_PROMPT}\n\n${EXPLORATION_ADDENDUM}` },
+        { role: "system", content: `${BASE_PROMPT}\n\n${addendum}` },
         { role: "user", content: context.contextBlock + memoryBlock },
       ];
 
@@ -143,8 +144,9 @@ export const respond = internalAction({
 
       const errorBudget = new Map<string, number>();
       let endTurn = false;
+      const maxIterations = context.mode === "combat" ? 10 : MAX_ITERATIONS;
 
-      for (let iteration = 0; iteration < MAX_ITERATIONS && !endTurn; iteration++) {
+      for (let iteration = 0; iteration < maxIterations && !endTurn; iteration++) {
         const overDeadline = Date.now() - startedAt > TURN_DEADLINE_MS;
         const result = await chatStream({
           messages: transcript,
@@ -185,6 +187,15 @@ export const respond = internalAction({
         messageId: gmMessageId,
         status: "complete",
       });
+
+      // Combat safety net: if a monster is still the active combatant after
+      // the GM finished (and we're not waiting on a player roll), the engine
+      // advances the turn itself so the fight never stalls.
+      if (context.mode === "combat" && !endTurn) {
+        await ctx.runMutation(internal.combat.autoAdvanceIfMonsterStuck, {
+          campaignId: args.campaignId,
+        });
+      }
 
       // Fire-and-forget memorization — never extends or blocks the turn
       await ctx.scheduler.runAfter(0, internal.gm.memory.memorizeTurn, {

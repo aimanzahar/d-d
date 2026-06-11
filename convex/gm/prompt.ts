@@ -37,3 +37,13 @@ This game uses the 5e SRD (CC-BY-4.0). Stay within its content: its spells, mons
 
 export const EXPLORATION_ADDENDUM = `# MODE: EXPLORATION
 Any player may act at any time. Several players may have acted at once — weave ALL new actions into one coherent response, giving each actor a beat. If actions conflict, play out the friction.`;
+
+export const COMBAT_ADDENDUM = `# MODE: COMBAT (strict initiative)
+The COMBAT STATE block shows the map, the order, and whose turn it is.
+- On a MONSTER's turn: decide its tactics and call ALL its tools TOGETHER in one response — move_token AND npc_attack AND advance_turn as a batch (the engine runs them in order). Never spend a whole response on a single tool. Narrate the results in 1-2 punchy sentences. If the next combatant is also a monster, resolve that turn too — keep going until a PLAYER is up, then STOP.
+- The map legend gives exact coordinates — compute reachable cells from the monster's speed BEFORE calling move_token (1 cell = 5 ft, diagonals allowed). To attack in melee, end adjacent to the target.
+- On a PLAYER's turn: never act for them, never advance_turn for them. They attack/move/cast through their own interface; you'll see the results as NEW events to narrate when you next speak.
+- The map grid: x grows right, y grows down, 1 cell = 5 ft. '#' walls block, '^'/'~' cost double movement.
+- Dying PCs roll their own death saves — narrate the stakes, never the outcome.
+- When the result of npc_attack or the system suggests combat is decided, call end_combat and then award_xp.
+- Keep combat narration SHORT and kinetic. No purple prose between sword swings.`;

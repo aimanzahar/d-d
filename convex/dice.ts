@@ -1,7 +1,9 @@
 import { ConvexError, v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { requirePlayer } from "./lib/auth";
+import { advanceAndSignal } from "./combat";
 import { rollD20, rollNotation } from "./lib/dice";
 import { abilityMod, profBonus, type AbilityKey } from "./lib/rules5e";
 import { SKILL_TO_ABILITY } from "./srd/static";
@@ -38,6 +40,94 @@ export function d20ModifierFor(
   return { modifier: abilityMod(character.abilities[key]), label: `${key.toUpperCase()} check` };
 }
 
+// Shared fulfillment: rolls, persists, handles death-save bookkeeping, and
+// wakes the GM (or advances the combat turn after a death save).
+export async function fulfillCore(
+  ctx: MutationCtx,
+  roll: Doc<"rolls">,
+  character: Doc<"characters">,
+  suffix = "",
+): Promise<{ total: number }> {
+  const { modifier } = d20ModifierFor(character, roll.purpose, roll.ability, roll.skill);
+  const outcome = rollD20(roll.advantage, modifier);
+  const success = roll.dc !== undefined ? outcome.total >= roll.dc : undefined;
+  const crit =
+    outcome.d20 === 20 ? ("hit" as const) : outcome.d20 === 1 ? ("miss" as const) : undefined;
+
+  await ctx.db.patch(roll._id, {
+    status: "rolled",
+    notation: outcome.notation,
+    dice: outcome.dice,
+    modifier,
+    total: outcome.total,
+    success,
+    crit,
+  });
+
+  if (roll.purpose === "death_save") {
+    const deathSaves = { ...character.deathSaves };
+    let note = "";
+    if (outcome.d20 === 20) {
+      await ctx.db.patch(character._id, {
+        currentHp: 1,
+        deathSaves: { successes: 0, failures: 0 },
+        conditions: character.conditions.filter(
+          (c) => c.name !== "unconscious" && c.name !== "stable" && c.name !== "prone",
+        ),
+      });
+      note = " — a miracle: back on their feet with 1 HP!";
+    } else {
+      if (outcome.d20 === 1) deathSaves.failures += 2;
+      else if (outcome.total >= 10) deathSaves.successes += 1;
+      else deathSaves.failures += 1;
+      let conditions = character.conditions;
+      if (deathSaves.successes >= 3) {
+        conditions = [...conditions.filter((c) => c.name !== "stable"), { name: "stable" }];
+        deathSaves.successes = 0;
+        deathSaves.failures = 0;
+        note = " — stable, but unconscious.";
+      } else if (deathSaves.failures >= 3) {
+        conditions = [...conditions, { name: "dead" }];
+        note = " — three failures. They are gone.";
+      }
+      await ctx.db.patch(character._id, { deathSaves, conditions });
+    }
+    await ctx.db.insert("messages", {
+      campaignId: roll.campaignId,
+      kind: "roll",
+      characterName: character.name,
+      content: `${character.name} death save${suffix}: ${outcome.total}${note}`,
+      status: "complete",
+      ooc: false,
+      processed: false,
+      rollId: roll._id,
+    });
+    // In combat, the death save IS the dying character's whole turn — advance.
+    const campaign = await ctx.db.get(roll.campaignId);
+    if (campaign?.mode === "combat" && campaign.activeCombatId) {
+      const combat = await ctx.db.get(campaign.activeCombatId);
+      if (combat?.status === "active") {
+        await advanceAndSignal(ctx, roll.campaignId, combat);
+        return { total: outcome.total };
+      }
+    }
+  } else {
+    await ctx.db.insert("messages", {
+      campaignId: roll.campaignId,
+      kind: "roll",
+      characterName: character.name,
+      content: `${character.name} rolls ${roll.context ?? roll.purpose}${suffix}: ${outcome.total}${crit === "hit" ? " — natural 20!" : crit === "miss" ? " — natural 1!" : ""}`,
+      status: "complete",
+      ooc: false,
+      processed: false,
+      rollId: roll._id,
+    });
+  }
+
+  await enqueueGm(ctx, roll.campaignId);
+  return { total: outcome.total };
+}
+
 // Player clicks "Roll!" on a GM-requested pending roll.
 export const fulfillRequest = mutation({
   args: { sessionToken: v.string(), rollId: v.id("rolls") },
@@ -53,82 +143,7 @@ export const fulfillRequest = mutation({
     }
     const character = await ctx.db.get(roll.characterId);
     if (!character) throw new ConvexError({ code: "not_found" });
-
-    const { modifier } = d20ModifierFor(
-      character,
-      roll.purpose,
-      roll.ability,
-      roll.skill,
-    );
-    const outcome = rollD20(roll.advantage, modifier);
-    const success = roll.dc !== undefined ? outcome.total >= roll.dc : undefined;
-    const crit =
-      outcome.d20 === 20 ? ("hit" as const) : outcome.d20 === 1 ? ("miss" as const) : undefined;
-
-    await ctx.db.patch(args.rollId, {
-      status: "rolled",
-      notation: outcome.notation,
-      dice: outcome.dice,
-      modifier,
-      total: outcome.total,
-      success,
-      crit,
-    });
-
-    // Death-save bookkeeping happens at fulfillment, not in the GM loop
-    if (roll.purpose === "death_save") {
-      const deathSaves = { ...character.deathSaves };
-      let note = "";
-      if (outcome.d20 === 20) {
-        await ctx.db.patch(character._id, {
-          currentHp: 1,
-          deathSaves: { successes: 0, failures: 0 },
-          conditions: character.conditions.filter(
-            (c) => c.name !== "unconscious" && c.name !== "stable",
-          ),
-        });
-        note = " — a miracle: back on their feet with 1 HP!";
-      } else {
-        if (outcome.d20 === 1) deathSaves.failures += 2;
-        else if (outcome.total >= 10) deathSaves.successes += 1;
-        else deathSaves.failures += 1;
-        let conditions = character.conditions;
-        if (deathSaves.successes >= 3) {
-          conditions = [...conditions.filter((c) => c.name !== "stable"), { name: "stable" }];
-          deathSaves.successes = 0;
-          deathSaves.failures = 0;
-          note = " — stable, but unconscious.";
-        } else if (deathSaves.failures >= 3) {
-          conditions = [...conditions, { name: "dead" }];
-          note = " — three failures. They are gone.";
-        }
-        await ctx.db.patch(character._id, { deathSaves, conditions });
-      }
-      await ctx.db.insert("messages", {
-        campaignId: roll.campaignId,
-        kind: "roll",
-        characterName: character.name,
-        content: `${character.name} death save: ${outcome.total}${note}`,
-        status: "complete",
-        ooc: false,
-        processed: false,
-        rollId: args.rollId,
-      });
-    } else {
-      await ctx.db.insert("messages", {
-        campaignId: roll.campaignId,
-        kind: "roll",
-        characterName: character.name,
-        content: `${character.name} rolls ${roll.context ?? roll.purpose}: ${outcome.total}${crit === "hit" ? " — natural 20!" : crit === "miss" ? " — natural 1!" : ""}`,
-        status: "complete",
-        ooc: false,
-        processed: false,
-        rollId: args.rollId,
-      });
-    }
-
-    await enqueueGm(ctx, roll.campaignId);
-    return { total: outcome.total };
+    return await fulfillCore(ctx, roll, character);
   },
 });
 
@@ -282,5 +297,26 @@ export const pendingRolls = query({
         advantage: r.advantage,
         mine: r.characterId === player.characterId,
       }));
+  },
+});
+
+// AFK guard (combat only): if a pending roll is still unanswered after the
+// scheduled delay, the server rolls it, tagged "(auto)".
+export const autoFulfillIfPending = internalMutation({
+  args: { campaignId: v.id("campaigns"), characterId: v.id("characters") },
+  handler: async (ctx, args) => {
+    const campaign = await ctx.db.get(args.campaignId);
+    if (campaign?.mode !== "combat") return; // exploration rolls wait forever
+    const pending = await ctx.db
+      .query("rolls")
+      .withIndex("by_campaign_status", (q) =>
+        q.eq("campaignId", args.campaignId).eq("status", "pending"),
+      )
+      .collect();
+    const roll = pending.find((r) => r.characterId === args.characterId);
+    if (!roll) return;
+    const character = await ctx.db.get(args.characterId);
+    if (!character) return;
+    await fulfillCore(ctx, roll, character, " (auto)");
   },
 });

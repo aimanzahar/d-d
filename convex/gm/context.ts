@@ -52,6 +52,60 @@ export const getContext = internalQuery({
       .withIndex("by_campaign_key", (q) => q.eq("campaignId", args.campaignId))
       .collect();
 
+    // Combat block: initiative + economy + ASCII battle map for spatial grounding
+    let combatBlock = "";
+    if (campaign.mode === "combat" && campaign.activeCombatId) {
+      const combat = await ctx.db.get(campaign.activeCombatId);
+      if (combat?.status === "active") {
+        const monsters = await ctx.db
+          .query("monsters")
+          .withIndex("by_combat", (q) => q.eq("combatId", combat._id))
+          .collect();
+        const active = combat.initiative[combat.activeIndex];
+        const order = combat.initiative
+          .map((e, i) => {
+            const marker = i === combat.activeIndex ? "▶ " : "";
+            if (e.kind === "monster") {
+              const m = monsters.find((x) => String(x._id) === e.refId);
+              return `${marker}${e.name} (${e.total})${m?.isDead ? " [DEAD]" : ""}`;
+            }
+            return `${marker}${e.name} (${e.total})`;
+          })
+          .join(" → ");
+
+        // ASCII map: digits = monsters, letters = PCs (legend below)
+        const rows = combat.map.terrain.map((r) => r.split(""));
+        const legend: string[] = [];
+        monsters.forEach((m, i) => {
+          if (m.isDead) return;
+          const symbol = String((i + 1) % 10);
+          if (rows[m.position.y]?.[m.position.x] !== undefined) {
+            rows[m.position.y][m.position.x] = symbol;
+          }
+          legend.push(
+            `${symbol}=${m.label} HP ${m.currentHp}/${m.maxHp} AC ${m.ac} speed ${m.speed} at (${m.position.x},${m.position.y})${m.conditions.length ? " [" + m.conditions.map((c) => c.name).join(",") + "]" : ""}`,
+          );
+        });
+        characters.forEach((c) => {
+          if (!c.position) return;
+          const symbol = c.name[0].toUpperCase();
+          if (rows[c.position.y]?.[c.position.x] !== undefined) {
+            rows[c.position.y][c.position.x] = symbol;
+          }
+          legend.push(`${symbol}=${c.name} at (${c.position.x},${c.position.y})`);
+        });
+
+        combatBlock = [
+          `\n# COMBAT STATE — round ${combat.round}, current turn: ▶ ${active?.name} (${active?.kind})`,
+          `Initiative: ${order}`,
+          `Turn economy: movement used ${combat.turnState.movementUsed} ft, action ${combat.turnState.actionUsed ? "SPENT" : "available"}`,
+          `Map ${combat.map.width}x${combat.map.height} (1 cell = 5 ft, '#' wall, '^'/'~' difficult):`,
+          rows.map((r) => r.join("")).join("\n"),
+          `Legend: ${legend.join(" | ")}`,
+        ].join("\n");
+      }
+    }
+
     // Unprocessed batch = the queue (cap 10 per turn)
     const unprocessed = await ctx.db
       .query("messages")
@@ -90,6 +144,7 @@ export const getContext = internalQuery({
       campaign.location.description,
       `\n# PARTY`,
       characters.map(condensedCharacter).join("\n"),
+      combatBlock,
       flags.length
         ? `\n# QUEST FLAGS\n${flags.map((f) => `${f.key} = ${JSON.stringify(f.value)}`).join("\n")}`
         : "",

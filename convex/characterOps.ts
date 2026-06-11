@@ -75,9 +75,21 @@ export async function applyHpDeltaCore(
     }
   } else {
     if (hp === 0 && delta > 0) {
-      // Healing from 0 removes unconscious + resets death saves
+      // Healing from 0 removes unconscious + resets death saves, and voids
+      // any still-pending death-save request
       conditions = conditions.filter((c) => c.name !== "unconscious" && c.name !== "stable");
       deathSaves = { successes: 0, failures: 0 };
+      const pending = await ctx.db
+        .query("rolls")
+        .withIndex("by_campaign_status", (q) =>
+          q.eq("campaignId", character.campaignId).eq("status", "pending"),
+        )
+        .collect();
+      for (const roll of pending) {
+        if (roll.characterId === character._id && roll.purpose === "death_save") {
+          await ctx.db.delete(roll._id);
+        }
+      }
     }
     hp = Math.min(character.maxHp, hp + delta);
   }
@@ -111,7 +123,7 @@ export const setCondition = internalMutation({
     durationRounds: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const valid = [...CONDITION_NAMES, "stable", "dead"];
+    const valid = [...CONDITION_NAMES, "stable", "dead", "dodging", "disengaged"];
     if (!valid.includes(args.condition)) {
       return { ok: false, error: `Unknown condition '${args.condition}'. Valid: ${valid.join(", ")}` };
     }

@@ -225,3 +225,26 @@ export const simulateCrashedGm = internalMutation({
     return { orphanId, generation: campaign.gm.generation + 1 };
   },
 });
+
+// Test helper: instantly slay a monster by label.
+export const slayMonster = internalMutation({
+  args: { label: v.string() },
+  handler: async (ctx, args) => {
+    const monsters = await ctx.db.query("monsters").collect();
+    const target = monsters.find((m) => m.label === args.label && !m.isDead);
+    if (!target) return "not found";
+    await ctx.db.patch(target._id, { currentHp: 0, isDead: true });
+    return `${target.label} slain`;
+  },
+});
+
+export const woundMonster = internalMutation({
+  args: { label: v.string(), hp: v.number() },
+  handler: async (ctx, args) => {
+    const monsters = await ctx.db.query("monsters").collect();
+    const target = monsters.find((m) => m.label === args.label && !m.isDead);
+    if (!target) return "not found";
+    await ctx.db.patch(target._id, { currentHp: args.hp });
+    return `${target.label} at ${args.hp} HP`;
+  },
+});
