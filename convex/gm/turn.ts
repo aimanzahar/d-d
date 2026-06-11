@@ -3,7 +3,8 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { internalAction, internalMutation } from "../_generated/server";
-import { chatStream, type ChatMessage, type ToolCall } from "../lib/llm";
+import { chatStream, embed, type ChatMessage, type ToolCall } from "../lib/llm";
+import { search } from "../lib/qdrant";
 import { BASE_PROMPT, EXPLORATION_ADDENDUM } from "./prompt";
 import { dispatchTool, TOOL_DEFS } from "./tools";
 
@@ -87,9 +88,37 @@ export const respond = internalAction({
         });
       }
 
+      // RAG: campaign memories + 5e rules, degraded to empty on any failure
+      let memoryBlock = "";
+      try {
+        if (context.newActionsText) {
+          const [vector] = await embed([
+            `${context.newActionsText}\n(at ${context.locationName})`.slice(0, 2000),
+          ]);
+          const [memories, rules] = await Promise.all([
+            search({ vector, campaignId: args.campaignId, kinds: ["scene", "npc", "lore"], limit: 6 }),
+            search({ vector, campaignId: "global", kinds: ["rule"], limit: 3 }),
+          ]);
+          const memoryLines = memories
+            .filter((h) => h.score > 0.45)
+            .map((h) => `[${h.payload.kind}] ${h.payload.text}`);
+          const ruleLines = rules
+            .filter((h) => h.score > 0.55)
+            .map((h) => `[rule: ${h.payload.title}] ${h.payload.text.slice(0, 600)}`);
+          if (memoryLines.length > 0) {
+            memoryBlock += `\n\n# RECALLED MEMORIES (older events that may be relevant)\n${memoryLines.join("\n")}`;
+          }
+          if (ruleLines.length > 0) {
+            memoryBlock += `\n\n# RULES REFERENCE\n${ruleLines.join("\n")}`;
+          }
+        }
+      } catch (error) {
+        console.error("RAG degraded to empty:", error);
+      }
+
       const transcript: ChatMessage[] = [
         { role: "system", content: `${BASE_PROMPT}\n\n${EXPLORATION_ADDENDUM}` },
-        { role: "user", content: context.contextBlock },
+        { role: "user", content: context.contextBlock + memoryBlock },
       ];
 
       gmMessageId = await ctx.runMutation(internal.messages.createGmMessage, {
@@ -155,6 +184,12 @@ export const respond = internalAction({
       await ctx.runMutation(internal.messages.finalizeGmMessage, {
         messageId: gmMessageId,
         status: "complete",
+      });
+
+      // Fire-and-forget memorization — never extends or blocks the turn
+      await ctx.scheduler.runAfter(0, internal.gm.memory.memorizeTurn, {
+        campaignId: args.campaignId,
+        gmMessageId,
       });
 
       const next = await ctx.runMutation(internal.gm.turn.finishTurn, args);

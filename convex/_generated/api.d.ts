@@ -14,6 +14,7 @@ import type * as characters from "../characters.js";
 import type * as crons from "../crons.js";
 import type * as dice from "../dice.js";
 import type * as gm_context from "../gm/context.js";
+import type * as gm_memory from "../gm/memory.js";
 import type * as gm_prompt from "../gm/prompt.js";
 import type * as gm_tools from "../gm/tools.js";
 import type * as gm_turn from "../gm/turn.js";
@@ -45,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   dice: typeof dice;
   "gm/context": typeof gm_context;
+  "gm/memory": typeof gm_memory;
   "gm/prompt": typeof gm_prompt;
   "gm/tools": typeof gm_tools;
   "gm/turn": typeof gm_turn;
