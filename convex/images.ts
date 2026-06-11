@@ -58,18 +58,23 @@ export const requestSceneImage = mutation({
       .replace(/[*>#_]/g, "")
       .slice(0, 420)
       .replace(/\s+\S*$/, "");
+    const STYLE =
+      "Epic dark fantasy digital painting, painterly brushwork, dramatic candle-and-comet light, rich color, wide cinematic establishing shot, no text, no watermark, no UI";
     const prompt = [
       `${campaign.location.name}: ${campaign.location.description}`,
       excerpt,
-      "Epic dark fantasy digital painting, painterly brushwork, dramatic candle-and-comet light, rich color, wide cinematic establishing shot, no text, no watermark, no UI",
+      STYLE,
     ]
       .filter(Boolean)
       .join(". ");
+    // Scenery-only fallback: combat narration regularly trips safety filters
+    const safePrompt = `A fantasy landscape. ${campaign.location.name}: ${campaign.location.description}. Empty of people, atmospheric scenery only. ${STYLE}`;
 
     const imageId = await ctx.db.insert("images", {
       campaignId: args.campaignId,
       requestedByPlayerId: player._id,
       prompt,
+      safePrompt,
       locationName: campaign.location.name,
       status: "generating",
     });
@@ -83,7 +88,8 @@ export const generate = internalAction({
   handler: async (ctx, args) => {
     const image = await ctx.runQuery(internal.images.getById, { imageId: args.imageId });
     if (!image) return;
-    try {
+
+    const attempt = async (prompt: string): Promise<Uint8Array<ArrayBuffer>> => {
       const res = await fetch(`${process.env.LLM_BASE_URL}/images/generations`, {
         method: "POST",
         headers: {
@@ -92,7 +98,7 @@ export const generate = internalAction({
         },
         body: JSON.stringify({
           model: IMAGE_MODEL,
-          prompt: image.prompt.slice(0, 980),
+          prompt: prompt.slice(0, 980),
           n: 1,
           size: "1536x1024",
           quality: "medium",
@@ -101,8 +107,22 @@ export const generate = internalAction({
       });
       const json = await res.json();
       const b64 = json.data?.[0]?.b64_json;
-      if (!b64) throw new Error(`no image data: ${JSON.stringify(json).slice(0, 200)}`);
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      if (!b64) throw new Error(`no image data: ${JSON.stringify(json).slice(0, 220)}`);
+      return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)) as Uint8Array<ArrayBuffer>;
+    };
+
+    try {
+      let bytes: Uint8Array<ArrayBuffer>;
+      try {
+        bytes = await attempt(image.prompt);
+      } catch (firstError) {
+        // Safety-filter rejections get one scenery-only retry
+        if (/safety|rejected|content.?policy/i.test(String(firstError)) && image.safePrompt) {
+          bytes = await attempt(image.safePrompt);
+        } else {
+          throw firstError;
+        }
+      }
       const storageId = await ctx.storage.store(new Blob([bytes], { type: "image/png" }));
       await ctx.runMutation(internal.images.finish, {
         imageId: args.imageId,

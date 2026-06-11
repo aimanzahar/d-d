@@ -1,6 +1,8 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { internalAction, mutation, query } from "./_generated/server";
 import { newInviteCode, newToken, requireHost, requirePlayer } from "./lib/auth";
+import { deleteByFilter } from "./lib/qdrant";
 import { enqueueGm } from "./messages";
 
 const MAX_PLAYERS = 6;
@@ -180,6 +182,81 @@ export const reissueToken = mutation({
     const fresh = newToken();
     await ctx.db.patch(args.playerId, { sessionToken: fresh });
     return { sessionToken: fresh, nickname: target.nickname };
+  },
+});
+
+// Host-only: delete the campaign and every trace of it — tables, stored
+// images, and Qdrant memories (G4).
+export const deleteCampaign = mutation({
+  args: { sessionToken: v.string(), campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    await requireHost(ctx, args.sessionToken, args.campaignId);
+
+    const images = await ctx.db
+      .query("images")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .collect();
+    for (const image of images) {
+      if (image.storageId) await ctx.storage.delete(image.storageId);
+      await ctx.db.delete(image._id);
+    }
+    for (const doc of await ctx.db
+      .query("players")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .collect()) {
+      await ctx.db.delete(doc._id);
+    }
+    for (const doc of await ctx.db
+      .query("characters")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .collect()) {
+      await ctx.db.delete(doc._id);
+    }
+    for (const doc of await ctx.db
+      .query("messages")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .collect()) {
+      await ctx.db.delete(doc._id);
+    }
+    for (const doc of await ctx.db
+      .query("rolls")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .collect()) {
+      await ctx.db.delete(doc._id);
+    }
+    const combats = await ctx.db
+      .query("combats")
+      .withIndex("by_campaign_status", (q) => q.eq("campaignId", args.campaignId))
+      .collect();
+    for (const combat of combats) {
+      const monsters = await ctx.db
+        .query("monsters")
+        .withIndex("by_combat", (q) => q.eq("combatId", combat._id))
+        .collect();
+      for (const m of monsters) await ctx.db.delete(m._id);
+      await ctx.db.delete(combat._id);
+    }
+    const flags = await ctx.db
+      .query("questFlags")
+      .withIndex("by_campaign_key", (q) => q.eq("campaignId", args.campaignId))
+      .collect();
+    for (const flag of flags) await ctx.db.delete(flag._id);
+    await ctx.db.delete(args.campaignId);
+    // Qdrant memories go in a fire-and-forget action
+    await ctx.scheduler.runAfter(0, internal.campaigns.purgeMemories, {
+      campaignId: String(args.campaignId),
+    });
+  },
+});
+
+export const purgeMemories = internalAction({
+  args: { campaignId: v.string() },
+  handler: async (_ctx, args) => {
+    try {
+      await deleteByFilter({ campaignId: args.campaignId });
+    } catch (error) {
+      console.error("Qdrant purge failed (non-fatal):", error);
+    }
   },
 });
 

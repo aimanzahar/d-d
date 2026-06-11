@@ -300,6 +300,55 @@ export const create = mutation({
   },
 });
 
+// Pragmatic level-up: average HP, slots/prof from the SRD levels table,
+// new features announced in the feed (subclass/spell picks land in the
+// sheet UI later — the mechanical core is correct now).
+export const levelUp = mutation({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    const player = await requirePlayer(ctx, args.sessionToken);
+    if (!player.characterId) throw new ConvexError({ code: "no_character" });
+    const character = await ctx.db.get(player.characterId);
+    if (!character || !character.pendingLevelUp) {
+      throw new ConvexError({ code: "no_level_pending" });
+    }
+    const newLevel = character.level + 1;
+    const levels = (await getSrd(ctx, "levels", `${character.classIndex}-${newLevel}`))
+      .data as any;
+    const conMod = abilityMod(character.abilities.con);
+    const hpGain = Math.max(1, Math.ceil((character.hitDice.die + 1) / 2) + conMod);
+
+    let spellcasting = character.spellcasting;
+    if (spellcasting && levels.spellcasting) {
+      const slots = spellcasting.slots.map((s, i) => {
+        const max = Number(levels.spellcasting[`spell_slots_level_${i + 1}`] ?? 0);
+        return { max, used: Math.min(s.used, max) };
+      });
+      spellcasting = { ...spellcasting, slots };
+    }
+
+    await ctx.db.patch(character._id, {
+      level: newLevel,
+      pendingLevelUp: false,
+      maxHp: character.maxHp + hpGain,
+      currentHp: character.currentHp + hpGain,
+      hitDice: { ...character.hitDice, max: newLevel },
+      ...(spellcasting ? { spellcasting } : {}),
+    });
+
+    const features = ((levels.features as any[]) ?? []).map((f) => f.name).join(", ");
+    await ctx.db.insert("messages", {
+      campaignId: character.campaignId,
+      kind: "system",
+      content: `✦ ${character.name} reaches level ${newLevel}! +${hpGain} HP${features ? ` — new: ${features}` : ""}`,
+      status: "complete",
+      ooc: false,
+      processed: true,
+    });
+    return { level: newLevel, hpGain };
+  },
+});
+
 export const getMine = query({
   args: { sessionToken: v.string() },
   handler: async (ctx, args) => {

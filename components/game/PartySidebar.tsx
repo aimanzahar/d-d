@@ -1,7 +1,7 @@
 "use client";
 
 import { animate } from "animejs";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
@@ -47,6 +47,8 @@ function HpBar({ current, max, temp }: { current: number; max: number; temp: num
 }
 
 function MemberCard({ character, isMe }: { character: Doc<"characters">; isMe: boolean }) {
+  const session = useSession();
+  const levelUp = useMutation(api.characters.levelUp);
   const dead = character.conditions.some((c) => c.name === "dead");
   const down = character.currentHp === 0 && !dead;
   return (
@@ -91,6 +93,14 @@ function MemberCard({ character, isMe }: { character: Doc<"characters">; isMe: b
             </span>
           ))}
         </div>
+      )}
+      {isMe && character.pendingLevelUp && (
+        <button
+          className="w-full mt-1 font-display text-[0.6rem] tracking-[0.25em] uppercase px-2 py-1.5 border border-gold text-gold-bright bg-gold/10 cursor-pointer animate-ember-pulse hover:bg-gold/20"
+          onClick={() => void levelUp({ sessionToken: session.sessionToken })}
+        >
+          ✦ Level up!
+        </button>
       )}
     </Panel>
   );

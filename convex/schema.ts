@@ -269,6 +269,7 @@ export default defineSchema({
     campaignId: v.id("campaigns"),
     requestedByPlayerId: v.id("players"),
     prompt: v.string(),
+    safePrompt: v.optional(v.string()), // scenery-only fallback for safety rejections
     locationName: v.string(),
     status: v.union(v.literal("generating"), v.literal("done"), v.literal("failed")),
     storageId: v.optional(v.id("_storage")),
