@@ -3,6 +3,7 @@
 import usePresence from "@convex-dev/presence/react";
 import { animate, stagger } from "animejs";
 import { useMutation, useQuery } from "convex/react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -43,6 +44,7 @@ function InviteCodeCard({ code }: { code: string }) {
 
 export function LobbyScreen() {
   const session = useSession();
+  const router = useRouter();
   const players = useQuery(api.players.list, {
     sessionToken: session.sessionToken,
     campaignId: session.campaignId,
@@ -146,9 +148,13 @@ export function LobbyScreen() {
                       : "No hero forged yet"}
                   </p>
                 </div>
-                {p.isMe && !p.character && (
-                  <Button variant="ember" size="sm" disabled title="The forge opens in the next build">
-                    Forge your hero
+                {p.isMe && (
+                  <Button
+                    variant={p.character ? "ghost" : "ember"}
+                    size="sm"
+                    onClick={() => router.push(`/c/${session.inviteCode}/create`)}
+                  >
+                    {p.character ? "Re-forge" : "Forge your hero"}
                   </Button>
                 )}
                 {session.isHost && !p.isMe && (
