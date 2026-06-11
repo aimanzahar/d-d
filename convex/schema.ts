@@ -1,0 +1,295 @@
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+
+// Canonical scene types — drives the 3D ambient scene picker and the
+// change_location GM tool. Keep in sync with lib/sceneTypes.ts on the client.
+export const sceneType = v.union(
+  v.literal("tavern"),
+  v.literal("forest"),
+  v.literal("dungeon"),
+  v.literal("cave"),
+  v.literal("town"),
+  v.literal("castle"),
+  v.literal("road"),
+  v.literal("ship"),
+  v.literal("mountain"),
+  v.literal("swamp"),
+  v.literal("temple"),
+  v.literal("field"),
+  v.literal("camp"),
+);
+
+const condition = v.object({
+  name: v.string(), // SRD condition index ('poisoned', ...) plus 'stable'
+  source: v.optional(v.string()),
+  expiresRound: v.optional(v.number()),
+});
+
+export default defineSchema({
+  campaigns: defineTable({
+    name: v.string(),
+    inviteCode: v.string(), // 6-char A-Z0-9, crypto-random
+    status: v.union(v.literal("lobby"), v.literal("active")),
+    mode: v.union(v.literal("exploration"), v.literal("combat")),
+    location: v.object({
+      name: v.string(),
+      description: v.string(),
+      sceneType,
+    }),
+    premise: v.string(), // host-entered adventure seed
+    summary: v.string(), // rolling compressed story digest (~1500 chars)
+    gm: v.object({
+      status: v.union(v.literal("idle"), v.literal("running")),
+      startedAt: v.optional(v.number()), // heartbeat — bumped on stream flush
+      generation: v.number(), // monotonic; stale scheduled actions no-op
+    }),
+    activeCombatId: v.optional(v.id("combats")),
+  }).index("by_inviteCode", ["inviteCode"]),
+
+  players: defineTable({
+    campaignId: v.id("campaigns"),
+    nickname: v.string(),
+    sessionToken: v.string(), // 32-byte hex; lives in client localStorage
+    isHost: v.boolean(),
+    characterId: v.optional(v.id("characters")),
+    lastSeenAt: v.number(),
+  })
+    .index("by_token", ["sessionToken"])
+    .index("by_campaign", ["campaignId"]),
+
+  characters: defineTable({
+    campaignId: v.id("campaigns"),
+    playerId: v.id("players"),
+    name: v.string(),
+    raceIndex: v.string(),
+    subraceIndex: v.optional(v.string()),
+    classIndex: v.string(),
+    subclassIndex: v.optional(v.string()),
+    backgroundIndex: v.string(), // 'acolyte' — the only SRD background
+    alignment: v.optional(v.string()),
+    level: v.number(),
+    xp: v.number(),
+    pendingLevelUp: v.boolean(),
+    abilities: v.object({
+      str: v.number(),
+      dex: v.number(),
+      con: v.number(),
+      int: v.number(),
+      wis: v.number(),
+      cha: v.number(),
+    }), // final scores incl. racial bonuses
+    maxHp: v.number(),
+    currentHp: v.number(),
+    tempHp: v.number(),
+    hitDice: v.object({ die: v.number(), max: v.number(), used: v.number() }),
+    ac: v.number(), // derived from equipped armor; recomputed on equip change
+    speed: v.number(), // feet
+    proficiencies: v.object({
+      skills: v.array(v.string()),
+      savingThrows: v.array(v.string()),
+      armor: v.array(v.string()),
+      weapons: v.array(v.string()),
+      tools: v.array(v.string()),
+      languages: v.array(v.string()),
+    }),
+    conditions: v.array(condition),
+    exhaustion: v.number(), // 0-6
+    deathSaves: v.object({ successes: v.number(), failures: v.number() }),
+    spellcasting: v.optional(
+      v.object({
+        ability: v.string(), // 'int' | 'wis' | 'cha'
+        cantrips: v.array(v.string()), // SRD spell indexes
+        known: v.array(v.string()),
+        prepared: v.array(v.string()),
+        // slots[0] = level-1 slots ... slots[8] = level-9
+        slots: v.array(v.object({ max: v.number(), used: v.number() })),
+      }),
+    ),
+    inventory: v.array(
+      v.object({
+        itemIndex: v.optional(v.string()), // SRD equipment index; absent = custom item
+        name: v.string(),
+        quantity: v.number(),
+        equipped: v.boolean(),
+      }),
+    ),
+    currency: v.object({
+      cp: v.number(),
+      sp: v.number(),
+      ep: v.number(),
+      gp: v.number(),
+      pp: v.number(),
+    }),
+    featureChoices: v.any(), // resolved choice-DSL picks (fighting style, ...)
+    position: v.optional(v.object({ x: v.number(), y: v.number() })), // combat grid cell
+    notes: v.string(),
+  })
+    .index("by_campaign", ["campaignId"])
+    .index("by_player", ["playerId"]),
+
+  messages: defineTable({
+    campaignId: v.id("campaigns"),
+    kind: v.union(
+      v.literal("gm"),
+      v.literal("player"),
+      v.literal("system"),
+      v.literal("roll"),
+      v.literal("image"),
+    ),
+    playerId: v.optional(v.id("players")),
+    characterName: v.optional(v.string()),
+    // GM messages: append-only while status === 'streaming' (frontend contract)
+    content: v.string(),
+    status: v.union(v.literal("streaming"), v.literal("complete"), v.literal("error")),
+    ooc: v.boolean(), // table talk; never triggers the GM
+    processed: v.boolean(), // GM-consumption flag — unprocessed docs are the GM queue
+    rollId: v.optional(v.id("rolls")),
+    imageId: v.optional(v.id("images")),
+    round: v.optional(v.number()), // combat round tag
+  })
+    .index("by_campaign", ["campaignId"])
+    .index("by_campaign_unprocessed", ["campaignId", "processed"]),
+
+  combats: defineTable({
+    campaignId: v.id("campaigns"),
+    status: v.union(v.literal("active"), v.literal("ended")),
+    round: v.number(),
+    activeIndex: v.number(), // pointer into initiative[]
+    initiative: v.array(
+      v.object({
+        kind: v.union(v.literal("pc"), v.literal("monster")),
+        refId: v.string(), // characterId or monsterId as string
+        name: v.string(),
+        total: v.number(),
+        dexMod: v.number(), // tiebreaker
+      }),
+    ),
+    // Action economy of the ACTIVE entry; reset on advance
+    turnState: v.object({
+      movementUsed: v.number(), // feet
+      actionUsed: v.boolean(),
+      bonusActionUsed: v.boolean(),
+      reactionUsed: v.boolean(),
+    }),
+    map: v.object({
+      width: v.number(), // cells, 1 cell = 5 ft, cap 30
+      height: v.number(),
+      terrain: v.array(v.string()), // rows of: '.' open '#' wall '^' difficult '~' water
+      theme: sceneType,
+    }),
+    outcome: v.optional(v.string()),
+  }).index("by_campaign_status", ["campaignId", "status"]),
+
+  monsters: defineTable({
+    campaignId: v.id("campaigns"),
+    combatId: v.id("combats"),
+    srdIndex: v.string(), // 'goblin'
+    label: v.string(), // 'Goblin 2' — unique within combat; GM addresses by label
+    maxHp: v.number(),
+    currentHp: v.number(),
+    ac: v.number(),
+    speed: v.number(),
+    position: v.object({ x: v.number(), y: v.number() }),
+    conditions: v.array(condition),
+    isDead: v.boolean(),
+    // Condensed at spawn from the SRD stat block — combat never re-reads SRD
+    stats: v.object({
+      abilities: v.object({
+        str: v.number(),
+        dex: v.number(),
+        con: v.number(),
+        int: v.number(),
+        wis: v.number(),
+        cha: v.number(),
+      }),
+      attacks: v.array(
+        v.object({
+          name: v.string(),
+          attackBonus: v.number(),
+          damageDice: v.string(),
+          damageType: v.string(),
+          reach: v.number(), // feet
+          range: v.optional(v.number()), // feet, ranged attacks
+        }),
+      ),
+      saveBonuses: v.any(), // { dex: 4, ... } from SRD proficiencies
+      cr: v.number(),
+      xp: v.number(),
+    }),
+  }).index("by_combat", ["combatId"]),
+
+  // The 3D dice animation contract: client physics-simulates, then face-remaps
+  // so resting faces equal results[].
+  rolls: defineTable({
+    campaignId: v.id("campaigns"),
+    characterId: v.optional(v.id("characters")),
+    actorName: v.string(), // 'Thorin' | 'Goblin 2' | 'GM'
+    requestedBy: v.union(v.literal("gm"), v.literal("player"), v.literal("system")),
+    purpose: v.string(), // 'attack'|'damage'|'ability_check'|'saving_throw'|'initiative'|'death_save'|'custom'
+    context: v.optional(v.string()), // "Stealth check to sneak past the guards"
+    skill: v.optional(v.string()),
+    ability: v.optional(v.string()),
+    advantage: v.union(
+      v.literal("normal"),
+      v.literal("advantage"),
+      v.literal("disadvantage"),
+    ),
+    dc: v.optional(v.number()), // stripped from public queries until rolled
+    visibility: v.union(v.literal("public"), v.literal("secret")),
+    status: v.union(v.literal("pending"), v.literal("rolled")),
+    notation: v.optional(v.string()), // '1d20+5'
+    dice: v.optional(
+      v.array(
+        v.object({
+          sides: v.number(),
+          count: v.number(),
+          results: v.array(v.number()),
+          dropped: v.array(v.number()), // discarded adv/disadv die, rendered dimmed
+        }),
+      ),
+    ),
+    modifier: v.optional(v.number()),
+    total: v.optional(v.number()),
+    success: v.optional(v.boolean()), // vs dc, when dc set
+    crit: v.optional(v.union(v.literal("hit"), v.literal("miss"))),
+  })
+    .index("by_campaign", ["campaignId"])
+    .index("by_campaign_status", ["campaignId", "status"]),
+
+  // Conventions: quest.<slug>.status / flag.<slug> / secret.<slug> (GM-only)
+  questFlags: defineTable({
+    campaignId: v.id("campaigns"),
+    key: v.string(),
+    value: v.union(v.string(), v.number(), v.boolean()),
+    updatedAt: v.number(),
+  }).index("by_campaign_key", ["campaignId", "key"]),
+
+  images: defineTable({
+    campaignId: v.id("campaigns"),
+    requestedByPlayerId: v.id("players"),
+    prompt: v.string(),
+    locationName: v.string(),
+    status: v.union(v.literal("generating"), v.literal("done"), v.literal("failed")),
+    storageId: v.optional(v.id("_storage")),
+    error: v.optional(v.string()),
+  }).index("by_campaign", ["campaignId"]),
+
+  // One generic SRD table: raw records keyed by (category, index slug).
+  srd: defineTable({
+    category: v.string(), // 'monsters'|'spells'|'equipment'|'magic-items'|'classes'|...
+    index: v.string(), // SRD slug; levels use synthetic '{class}-{level}'
+    name: v.string(),
+    data: v.any(), // raw SRD record, cross-refs stay {index,name,url}
+    spellLevel: v.optional(v.number()), // promoted: spells
+    cr: v.optional(v.number()), // promoted: monsters
+    classIndex: v.optional(v.string()), // promoted: levels/features/subclasses
+  })
+    .index("by_category_index", ["category", "index"])
+    .index("by_category_level", ["category", "spellLevel"])
+    .index("by_category_cr", ["category", "cr"])
+    .index("by_category_class", ["category", "classIndex"])
+    .searchIndex("search_name", {
+      searchField: "name",
+      filterFields: ["category"],
+    }),
+});

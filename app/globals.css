@@ -1,26 +1,158 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@theme {
+  /* Candle-lit war table palette */
+  --color-ink: #0c0a14;
+  --color-ink-soft: #14101f;
+  --color-ink-raise: #1c1530;
+  --color-parchment: #e8dcc0;
+  --color-parchment-dim: #a89c80;
+  --color-parchment-faint: #6f6654;
+  --color-gold: #c9a45c;
+  --color-gold-bright: #e8c87a;
+  --color-gold-dim: #8a703f;
+  --color-arcane: #8b5cf6;
+  --color-arcane-soft: #b79df8;
+  --color-ember: #e8722a;
+  --color-ember-bright: #ff9a4d;
+  --color-blood: #a32638;
+  --color-vitality: #3f9e63;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --radius-panel: 0.25rem;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  --animate-flicker: flicker 3.2s ease-in-out infinite;
+  --animate-ember-pulse: ember-pulse 2.6s ease-in-out infinite;
+
+  @keyframes flicker {
+    0%, 100% { opacity: 1; }
+    42% { opacity: 0.86; }
+    58% { opacity: 0.96; }
+    71% { opacity: 0.82; }
+  }
+  @keyframes ember-pulse {
+    0%, 100% { box-shadow: 0 0 18px color-mix(in oklab, var(--color-ember) 35%, transparent); }
+    50% { box-shadow: 0 0 32px color-mix(in oklab, var(--color-ember) 60%, transparent); }
   }
 }
 
+/* next/font variables (set on <html>) mapped to Tailwind font utilities */
+@theme inline {
+  --font-display: var(--font-cinzel);
+  --font-narrative: var(--font-crimson);
+  --font-ui: var(--font-alegreya);
+  --font-dice: var(--font-jetbrains);
+}
+
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-ink);
+  color: var(--color-parchment);
+  font-family: var(--font-ui);
+  /* Layered candle glow: warm pool low-center, arcane breath upper-right */
+  background-image:
+    radial-gradient(120% 90% at 50% 115%, rgba(232, 114, 42, 0.13) 0%, transparent 55%),
+    radial-gradient(70% 55% at 85% -10%, rgba(139, 92, 246, 0.10) 0%, transparent 60%),
+    radial-gradient(45% 35% at 12% 20%, rgba(201, 164, 92, 0.05) 0%, transparent 70%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-ember) 45%, transparent);
+  color: var(--color-parchment);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--color-gold-dim) 45%, transparent);
+  border-radius: 5px;
+  border: 2px solid var(--color-ink);
+}
+
+/* Film grain + vignette atmosphere layers (between any 3D canvas and the UI) */
+.fx-grain {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.fx-vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: radial-gradient(115% 100% at 50% 45%, transparent 58%, rgba(5, 4, 10, 0.55) 100%);
+}
+
+/* Notched "beaten metal fitting" panel: outer = gradient border, inner = glass */
+.panel-notch,
+.panel-notch-inner {
+  clip-path: polygon(
+    14px 0, calc(100% - 14px) 0, 100% 14px,
+    100% calc(100% - 14px), calc(100% - 14px) 100%,
+    14px 100%, 0 calc(100% - 14px), 0 14px
+  );
+}
+.panel-notch {
+  padding: 1px;
+  background: linear-gradient(
+    160deg,
+    color-mix(in oklab, var(--color-gold) 55%, transparent) 0%,
+    color-mix(in oklab, var(--color-gold-dim) 25%, transparent) 35%,
+    color-mix(in oklab, var(--color-gold-dim) 18%, transparent) 65%,
+    color-mix(in oklab, var(--color-gold) 45%, transparent) 100%
+  );
+}
+.panel-notch-inner {
+  background: color-mix(in oklab, var(--color-ink-soft) 82%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.gold-text {
+  background: linear-gradient(175deg, var(--color-gold-bright) 20%, var(--color-gold) 55%, var(--color-gold-dim) 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Shimmer sweep for the invite code card */
+@keyframes code-shimmer {
+  0% { transform: translateX(-120%) skewX(-18deg); }
+  100% { transform: translateX(240%) skewX(-18deg); }
+}
+.code-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, rgba(232, 200, 122, 0.16), transparent);
+  animation: code-shimmer 3.4s ease-in-out infinite;
+}
+
+/* Input fields */
+.field-arcane {
+  background: color-mix(in oklab, var(--color-ink) 70%, transparent);
+  border: 1px solid color-mix(in oklab, var(--color-gold-dim) 40%, transparent);
+  color: var(--color-parchment);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.field-arcane::placeholder {
+  color: var(--color-parchment-faint);
+}
+.field-arcane:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--color-gold) 70%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-gold) 30%, transparent),
+    0 0 24px color-mix(in oklab, var(--color-ember) 12%, transparent);
 }
