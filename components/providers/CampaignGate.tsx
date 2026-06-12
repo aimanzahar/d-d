@@ -1,11 +1,12 @@
 "use client";
 
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { api } from "@/convex/_generated/api";
+import { useAccount } from "@/hooks/useAccount";
 import { SessionContext, type Session } from "@/hooks/useSession";
-import { getSessionToken } from "@/lib/session";
+import { clearSessionToken, getSessionToken } from "@/lib/session";
 
 function Splash() {
   return (
@@ -47,12 +48,28 @@ export function CampaignGate({ children }: { children: ReactNode }) {
 
   const me = useQuery(api.players.resume, token ? { sessionToken: token } : "skip");
 
+  // Quietly attach pre-account seats to the signed-in account (fire-and-forget).
+  const { accountToken } = useAccount();
+  const claim = useMutation(api.accounts.claimPlayer);
+  const claimAttempted = useRef(false);
+  useEffect(() => {
+    if (me && me.hasUser === false && typeof accountToken === "string" && !claimAttempted.current) {
+      claimAttempted.current = true;
+      void claim({ sessionToken: token!, accountToken });
+    }
+  }, [me, accountToken, claim, token]);
+
   const invalid =
     token === null || (me !== undefined && (me === null || me.inviteCode !== code));
 
   useEffect(() => {
-    if (invalid) router.replace(`/c/${code}/join`);
-  }, [invalid, router, code]);
+    if (!invalid) return;
+    // A definitively-rejected token (rotated by host reissue, or campaign
+    // deleted) must be dropped, or the join page's local-token redirect
+    // bounces straight back here forever.
+    if (token && me === null) clearSessionToken(code);
+    router.replace(`/c/${code}/join`);
+  }, [invalid, router, code, token, me]);
 
   if (token === undefined || (token && me === undefined) || invalid) return <Splash />;
 

@@ -26,6 +26,29 @@ const condition = v.object({
 });
 
 export default defineSchema({
+  // Persistent accounts (email+password and/or Google). Campaign membership
+  // still rides on players.sessionToken — accountToken only proves identity.
+  users: defineTable({
+    email: v.string(), // stored lowercased+trimmed
+    name: v.string(),
+    passwordHash: v.optional(v.string()), // pbkdf2-sha256$iter$salt$hash; absent = Google-only
+    googleSub: v.optional(v.string()),
+    image: v.optional(v.string()),
+    failedLogins: v.optional(v.number()),
+    lockedUntil: v.optional(v.number()),
+  })
+    .index("by_email", ["email"])
+    .index("by_googleSub", ["googleSub"]),
+
+  accountSessions: defineTable({
+    userId: v.id("users"),
+    token: v.string(), // 32-byte hex accountToken; lives in client localStorage
+    createdAt: v.number(),
+    lastSeenAt: v.optional(v.number()),
+  })
+    .index("by_token", ["token"])
+    .index("by_user", ["userId"]),
+
   campaigns: defineTable({
     name: v.string(),
     inviteCode: v.string(), // 6-char A-Z0-9, crypto-random
@@ -52,10 +75,12 @@ export default defineSchema({
     sessionToken: v.string(), // 32-byte hex; lives in client localStorage
     isHost: v.boolean(),
     characterId: v.optional(v.id("characters")),
+    userId: v.optional(v.id("users")), // owning account; absent = unclaimed legacy seat
     lastSeenAt: v.number(),
   })
     .index("by_token", ["sessionToken"])
-    .index("by_campaign", ["campaignId"]),
+    .index("by_campaign", ["campaignId"])
+    .index("by_user", ["userId"]),
 
   characters: defineTable({
     campaignId: v.id("campaigns"),

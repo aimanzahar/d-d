@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Alegreya_Sans, Cinzel, Crimson_Pro, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ConvexClientProvider } from "@/components/providers/ConvexClientProvider";
+import { AccountProvider } from "@/hooks/useAccount";
 
 const cinzel = Cinzel({
   variable: "--font-cinzel",
@@ -42,7 +43,9 @@ export default function RootLayout({
       className={`${cinzel.variable} ${crimson.variable} ${alegreya.variable} ${jetbrains.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <ConvexClientProvider>{children}</ConvexClientProvider>
+        <ConvexClientProvider>
+          <AccountProvider>{children}</AccountProvider>
+        </ConvexClientProvider>
         <div className="fx-vignette" aria-hidden />
         <div className="fx-grain" aria-hidden />
       </body>

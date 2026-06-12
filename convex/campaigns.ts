@@ -1,7 +1,13 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalAction, mutation, query } from "./_generated/server";
-import { newInviteCode, newToken, requireHost, requirePlayer } from "./lib/auth";
+import {
+  newInviteCode,
+  newToken,
+  requireAccount,
+  requireHost,
+  requirePlayer,
+} from "./lib/auth";
 import { deleteByFilter } from "./lib/qdrant";
 import { enqueueGm } from "./messages";
 
@@ -12,8 +18,10 @@ export const create = mutation({
     name: v.string(),
     nickname: v.string(),
     premise: v.string(),
+    accountToken: v.string(),
   },
   handler: async (ctx, args) => {
+    const { user } = await requireAccount(ctx, args.accountToken);
     const name = args.name.trim().slice(0, 60);
     const nickname = args.nickname.trim().slice(0, 24);
     if (!name || !nickname) throw new ConvexError({ code: "missing_fields" });
@@ -50,6 +58,7 @@ export const create = mutation({
       nickname,
       sessionToken,
       isHost: true,
+      userId: user._id,
       lastSeenAt: Date.now(),
     });
 
@@ -58,10 +67,9 @@ export const create = mutation({
 });
 
 export const join = mutation({
-  args: { inviteCode: v.string(), nickname: v.string() },
+  args: { inviteCode: v.string(), nickname: v.string(), accountToken: v.string() },
   handler: async (ctx, args) => {
-    const nickname = args.nickname.trim().slice(0, 24);
-    if (!nickname) throw new ConvexError({ code: "missing_fields" });
+    const { user } = await requireAccount(ctx, args.accountToken);
 
     const campaign = await ctx.db
       .query("campaigns")
@@ -70,6 +78,25 @@ export const join = mutation({
       )
       .unique();
     if (!campaign) throw new ConvexError({ code: "campaign_not_found" });
+
+    // Idempotent rejoin: an account already seated in this campaign gets its
+    // existing player back — before the started/full/nickname gates.
+    const mine = await ctx.db
+      .query("players")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+    const existing = mine.find((p) => p.campaignId === campaign._id);
+    if (existing) {
+      return {
+        campaignId: campaign._id,
+        inviteCode: campaign.inviteCode,
+        sessionToken: existing.sessionToken,
+        playerId: existing._id,
+      };
+    }
+
+    const nickname = args.nickname.trim().slice(0, 24);
+    if (!nickname) throw new ConvexError({ code: "missing_fields" });
     if (campaign.status !== "lobby") throw new ConvexError({ code: "campaign_started" });
 
     const players = await ctx.db
@@ -87,6 +114,7 @@ export const join = mutation({
       nickname,
       sessionToken,
       isHost: false,
+      userId: user._id,
       lastSeenAt: Date.now(),
     });
 

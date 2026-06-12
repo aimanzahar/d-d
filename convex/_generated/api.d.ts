@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as accounts from "../accounts.js";
 import type * as campaigns from "../campaigns.js";
 import type * as characterOps from "../characterOps.js";
 import type * as characters from "../characters.js";
@@ -23,8 +24,10 @@ import type * as images from "../images.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_battleMaps from "../lib/battleMaps.js";
 import type * as lib_dice from "../lib/dice.js";
+import type * as lib_googleToken from "../lib/googleToken.js";
 import type * as lib_grid from "../lib/grid.js";
 import type * as lib_llm from "../lib/llm.js";
+import type * as lib_password from "../lib/password.js";
 import type * as lib_qdrant from "../lib/qdrant.js";
 import type * as lib_rules5e from "../lib/rules5e.js";
 import type * as messages from "../messages.js";
@@ -44,6 +47,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  accounts: typeof accounts;
   campaigns: typeof campaigns;
   characterOps: typeof characterOps;
   characters: typeof characters;
@@ -59,8 +63,10 @@ declare const fullApi: ApiFromModules<{
   "lib/auth": typeof lib_auth;
   "lib/battleMaps": typeof lib_battleMaps;
   "lib/dice": typeof lib_dice;
+  "lib/googleToken": typeof lib_googleToken;
   "lib/grid": typeof lib_grid;
   "lib/llm": typeof lib_llm;
+  "lib/password": typeof lib_password;
   "lib/qdrant": typeof lib_qdrant;
   "lib/rules5e": typeof lib_rules5e;
   messages: typeof messages;

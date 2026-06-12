@@ -50,4 +50,10 @@ export const repairStaleGmLocks = internalMutation({
 
 const crons = cronJobs();
 crons.interval("repair stale GM locks", { minutes: 5 }, internal.crons.repairStaleGmLocks, {});
+crons.interval(
+  "prune expired account sessions",
+  { hours: 24 },
+  internal.accounts.pruneExpiredSessions,
+  {},
+);
 export default crons;

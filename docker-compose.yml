@@ -5,6 +5,8 @@ services:
       args:
         # Inlined into the client bundle at build time
         NEXT_PUBLIC_CONVEX_URL: https://convex.zahar.my
+        # Public OAuth client id (not a secret) — see "Accounts & Google sign-in" in the README
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: 1003470321669-e8i7j0ej6d1ul6o2aml64orfgj61pe0q.apps.googleusercontent.com
     image: emberquill:latest
     ports:
       # override with EMBERQUILL_PORT=3002 docker compose up -d

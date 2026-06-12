@@ -17,6 +17,7 @@ export const resume = query({
       playerId: player._id,
       nickname: player.nickname,
       isHost: player.isHost,
+      hasUser: !!player.userId,
       characterId: player.characterId ?? null,
       campaignId: campaign._id,
       inviteCode: campaign.inviteCode,

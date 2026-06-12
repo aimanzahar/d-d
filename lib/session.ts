@@ -28,3 +28,10 @@ export function clearSessionToken(inviteCode: string): void {
   delete all[inviteCode.toUpperCase()];
   window.localStorage.setItem(KEY, JSON.stringify(all));
 }
+
+// Sign-out hygiene: on a shared browser, the next account must not inherit
+// this one's seats. Claimed seats are recoverable via "Your campaigns".
+export function clearAllSessionTokens(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(KEY);
+}

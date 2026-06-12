@@ -248,3 +248,27 @@ export const woundMonster = internalMutation({
     return `${target.label} at ${args.hp} HP`;
   },
 });
+
+// Accounts prereq: prove PBKDF2 via crypto.subtle works on this self-hosted
+// backend build and measure cost at 600k iterations. Run: npx convex run smoke:pbkdf2
+export const pbkdf2 = internalAction({
+  args: {},
+  handler: async () => {
+    const salt = new Uint8Array(16);
+    crypto.getRandomValues(salt);
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode("smoke-test-password"),
+      "PBKDF2",
+      false,
+      ["deriveBits"],
+    );
+    const t0 = Date.now();
+    const bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", hash: "SHA-256", iterations: 600_000, salt },
+      key,
+      256,
+    );
+    return { ok: bits.byteLength === 32, ms: Date.now() - t0 };
+  },
+});

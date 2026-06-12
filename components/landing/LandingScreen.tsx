@@ -6,9 +6,12 @@ import { ConvexError } from "convex/values";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "@/convex/_generated/api";
+import { useAccount } from "@/hooks/useAccount";
 import { useAnimeScope } from "@/hooks/useAnimeScope";
 import { withBasePath } from "@/lib/basePath";
 import { saveSessionToken } from "@/lib/session";
+import { AuthCard } from "@/components/landing/AuthCard";
+import { MyCampaigns } from "@/components/landing/MyCampaigns";
 import { Button } from "@/components/ui/Button";
 import { Label, TextArea, TextInput } from "@/components/ui/Field";
 import { OrnateRule } from "@/components/ui/OrnateRule";
@@ -20,6 +23,7 @@ const ERRORS: Record<string, string> = {
   campaign_started: "That party has already set out — the gate is closed.",
   campaign_full: "The table is full. Six adventurers is a crowd already.",
   nickname_taken: "Someone at that table already bears this name.",
+  invalid_account: "Your ledger entry has expired — sign in again.",
 };
 
 function errorMessage(e: unknown): string {
@@ -32,6 +36,7 @@ function errorMessage(e: unknown): string {
 
 export function LandingScreen() {
   const router = useRouter();
+  const { accountToken, me, signOut } = useAccount();
   const create = useMutation(api.campaigns.create);
   const join = useMutation(api.campaigns.join);
 
@@ -81,6 +86,7 @@ export function LandingScreen() {
   });
 
   async function handleCreate() {
+    if (!accountToken) return; // unreachable: the form only renders signed-in
     setBusy(true);
     setError(null);
     try {
@@ -88,6 +94,7 @@ export function LandingScreen() {
         name: campaignName,
         nickname: hostName,
         premise,
+        accountToken,
       });
       saveSessionToken(result.inviteCode, result.sessionToken);
       router.push(`/c/${result.inviteCode}/lobby`);
@@ -98,10 +105,15 @@ export function LandingScreen() {
   }
 
   async function handleJoin() {
+    if (!accountToken) return; // unreachable: the form only renders signed-in
     setBusy(true);
     setError(null);
     try {
-      const result = await join({ inviteCode: joinCode, nickname: joinName });
+      const result = await join({
+        inviteCode: joinCode,
+        nickname: joinName,
+        accountToken,
+      });
       saveSessionToken(result.inviteCode, result.sessionToken);
       router.push(`/c/${result.inviteCode}/lobby`);
     } catch (e) {
@@ -146,6 +158,23 @@ export function LandingScreen() {
         </div>
       </div>
 
+      {/* Account chip — pinned outside the centered column so it never
+          disturbs the hero rhythm. Nothing while hydrating or signed out. */}
+      {me && (
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
+          <span className="font-display text-[0.6rem] tracking-[0.2em] uppercase text-parchment-faint">
+            signed in as {me?.name}
+          </span>
+          <button
+            type="button"
+            onClick={signOut}
+            className="font-display text-[0.6rem] tracking-[0.2em] uppercase text-gold-dim hover:text-gold transition-colors cursor-pointer"
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+
       <div className="relative flex-1 flex flex-col items-center justify-center py-6 w-full">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -176,93 +205,104 @@ export function LandingScreen() {
           &mdash; and the Game Master never sleeps.
         </p>
 
-        <div className="hero-rise grid md:grid-cols-2 gap-6 w-full max-w-4xl opacity-0">
-          {/* Forge a campaign */}
-          <Panel innerClassName="p-7">
-            <h2 className="font-display text-base tracking-[0.2em] text-gold mb-6 uppercase">
-              Forge a Campaign
-            </h2>
-            <div className="space-y-4">
-              <label className="block">
-                <Label>Campaign name</Label>
-                <TextInput
-                  value={campaignName}
-                  onChange={(e) => setCampaignName(e.target.value)}
-                  placeholder="The Ashes of Veldrenmoor"
-                  maxLength={60}
-                />
-              </label>
-              <label className="block">
-                <Label>Your name</Label>
-                <TextInput
-                  value={hostName}
-                  onChange={(e) => setHostName(e.target.value)}
-                  placeholder="What the table calls you"
-                  maxLength={24}
-                />
-              </label>
-              <label className="block">
-                <Label>The premise — seed for your Game Master</Label>
-                <TextArea
-                  rows={4}
-                  value={premise}
-                  onChange={(e) => setPremise(e.target.value)}
-                  placeholder="A mining town has gone silent beneath a red comet. The last caravan returned empty, horses still in harness…"
-                  maxLength={2000}
-                />
-              </label>
-              <Button
-                variant="ember"
-                size="lg"
-                className="w-full"
-                disabled={busy || !campaignName.trim() || !hostName.trim() || !premise.trim()}
-                onClick={handleCreate}
-              >
-                Light the candles
-              </Button>
-            </div>
-          </Panel>
+        {/* Auth state hydrates after mount, so none of these blocks exist
+            during the hero-rise entrance pass — they render plainly (no
+            hero-rise/opacity-0, which would leave them stuck invisible). */}
+        {accountToken === undefined ? null : accountToken === null ? (
+          <AuthCard />
+        ) : (
+          <div className="w-full flex flex-col items-center gap-6">
+            <MyCampaigns />
 
-          {/* Join by code */}
-          <Panel innerClassName="p-7 flex flex-col">
-            <h2 className="font-display text-base tracking-[0.2em] text-gold mb-6 uppercase">
-              Join by Code
-            </h2>
-            <div className="space-y-4 flex-1">
-              <label className="block">
-                <Label>Invite code</Label>
-                <TextInput
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                  placeholder="KQ7M2X"
-                  maxLength={6}
-                  className="font-dice tracking-[0.45em] text-center text-lg uppercase"
-                />
-              </label>
-              <label className="block">
-                <Label>Your name</Label>
-                <TextInput
-                  value={joinName}
-                  onChange={(e) => setJoinName(e.target.value)}
-                  placeholder="What the table will call you"
-                  maxLength={24}
-                />
-              </label>
+            <div className="grid md:grid-cols-2 gap-6 w-full max-w-4xl">
+              {/* Forge a campaign */}
+              <Panel innerClassName="p-7">
+                <h2 className="font-display text-base tracking-[0.2em] text-gold mb-6 uppercase">
+                  Forge a Campaign
+                </h2>
+                <div className="space-y-4">
+                  <label className="block">
+                    <Label>Campaign name</Label>
+                    <TextInput
+                      value={campaignName}
+                      onChange={(e) => setCampaignName(e.target.value)}
+                      placeholder="The Ashes of Veldrenmoor"
+                      maxLength={60}
+                    />
+                  </label>
+                  <label className="block">
+                    <Label>Your name</Label>
+                    <TextInput
+                      value={hostName}
+                      onChange={(e) => setHostName(e.target.value)}
+                      placeholder="What the table calls you"
+                      maxLength={24}
+                    />
+                  </label>
+                  <label className="block">
+                    <Label>The premise — seed for your Game Master</Label>
+                    <TextArea
+                      rows={4}
+                      value={premise}
+                      onChange={(e) => setPremise(e.target.value)}
+                      placeholder="A mining town has gone silent beneath a red comet. The last caravan returned empty, horses still in harness…"
+                      maxLength={2000}
+                    />
+                  </label>
+                  <Button
+                    variant="ember"
+                    size="lg"
+                    className="w-full"
+                    disabled={busy || !campaignName.trim() || !hostName.trim() || !premise.trim()}
+                    onClick={handleCreate}
+                  >
+                    Light the candles
+                  </Button>
+                </div>
+              </Panel>
+
+              {/* Join by code */}
+              <Panel innerClassName="p-7 flex flex-col">
+                <h2 className="font-display text-base tracking-[0.2em] text-gold mb-6 uppercase">
+                  Join by Code
+                </h2>
+                <div className="space-y-4 flex-1">
+                  <label className="block">
+                    <Label>Invite code</Label>
+                    <TextInput
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                      placeholder="KQ7M2X"
+                      maxLength={6}
+                      className="font-dice tracking-[0.45em] text-center text-lg uppercase"
+                    />
+                  </label>
+                  <label className="block">
+                    <Label>Your name</Label>
+                    <TextInput
+                      value={joinName}
+                      onChange={(e) => setJoinName(e.target.value)}
+                      placeholder="What the table will call you"
+                      maxLength={24}
+                    />
+                  </label>
+                </div>
+                <p className="font-narrative italic text-sm text-parchment-faint my-5">
+                  Six letters from a friend are all it takes to pull up a chair.
+                </p>
+                <Button
+                  variant="gold"
+                  size="lg"
+                  className="w-full"
+                  disabled={busy || joinCode.trim().length !== 6 || !joinName.trim()}
+                  onClick={handleJoin}
+                >
+                  Take your seat
+                </Button>
+              </Panel>
             </div>
-            <p className="font-narrative italic text-sm text-parchment-faint my-5">
-              Six letters from a friend are all it takes to pull up a chair.
-            </p>
-            <Button
-              variant="gold"
-              size="lg"
-              className="w-full"
-              disabled={busy || joinCode.trim().length !== 6 || !joinName.trim()}
-              onClick={handleJoin}
-            >
-              Take your seat
-            </Button>
-          </Panel>
-        </div>
+          </div>
+        )}
 
         {error && (
           <p className="mt-6 text-blood font-narrative italic text-base" role="alert">

@@ -9,6 +9,8 @@ a campaign, friends join with a 6-character room code, and DeepSeek narrates,
 adjudicates, rolls (server-side, always), and commands the monsters — while
 every player watches the same world update live.
 
+**Play it live →** https://project.a.pinggy.link/ember
+
 ## What's inside
 
 - **AI Game Master** (`deepseek-v4-pro` via an OpenAI-compatible gateway):
@@ -37,6 +39,10 @@ every player watches the same world update live.
   HP drains, banner sweeps, roll pops.
 - **Scene visions**: any player can conjure an image of the current scene
   (`gpt-image-2`), stored in Convex storage with cooldowns and a daily cap.
+- **Accounts**: signing in (email/password or Google) is required to forge or
+  join a campaign. "Your campaigns" follows your account, so any device can
+  rejoin mid-adventure — and sessions from before accounts existed keep
+  working, linking themselves to your account on your first signed-in visit.
 
 ## Stack
 
@@ -56,8 +62,10 @@ That's it — the image only serves the web app; it talks to the already-running
 Convex/Qdrant/LLM backends. To point the frontend at a different Convex
 deployment, change the `NEXT_PUBLIC_CONVEX_URL` build arg in
 `docker-compose.yml` (it is baked into the client bundle at build time, so
-rebuild after changing it). Backend function pushes and seeding still happen
-from a dev checkout with `npx convex dev` (see below).
+rebuild after changing it). The Google button is wired the same way through
+the `NEXT_PUBLIC_GOOGLE_CLIENT_ID` build arg — a public OAuth client id, safe
+to commit (see [Google sign-in](#google-sign-in)). Backend function pushes and
+seeding still happen from a dev checkout with `npx convex dev` (see below).
 
 ## Running it (local dev)
 
@@ -68,12 +76,14 @@ npm install
 CONVEX_SELF_HOSTED_URL='https://<your-convex>'
 CONVEX_SELF_HOSTED_ADMIN_KEY='<admin key>'
 NEXT_PUBLIC_CONVEX_URL='https://<your-convex>'
+NEXT_PUBLIC_GOOGLE_CLIENT_ID='<oauth web client id>'
 
 # Convex server-side env
 npx convex env set LLM_BASE_URL  https://your-openai-compatible-endpoint/v1
 npx convex env set LLM_API_KEY   sk-...
 npx convex env set QDRANT_URL    https://<your-qdrant>
 npx convex env set QDRANT_API_KEY ...
+npx convex env set AUTH_GOOGLE_ID <oauth web client id>
 
 npx convex dev          # push functions (keep running for live dev)
 
@@ -86,8 +96,27 @@ npx convex run seed:seedRulesToQdrant
 npm run dev
 ```
 
-Create a campaign on the landing page, send friends the code, forge heroes,
-and begin the adventure.
+Sign in on the landing page (email/password works out of the box), create a
+campaign, send friends the code, forge heroes, and begin the adventure.
+
+## Google sign-in
+
+Both env vars above carry the same value: an **OAuth Web application client
+id** from the Google Cloud Console. `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (in
+`.env.local`, or the Docker build arg) renders the button in the browser;
+`npx convex env set AUTH_GOOGLE_ID <id>` lets the deployment verify the
+credential server-side. In the Cloud Console, add your public https origin
+and `http://localhost:3001` under **Authorized JavaScript origins** — no
+redirect URIs are needed, since the button uses the Google Identity Services
+flow rather than a redirect.
+
+## Self-hosting notes
+
+If file downloads from the self-hosted Convex dashboard 404, set
+`CONVEX_CLOUD_ORIGIN=https://convex.zahar.my` (your public proxy origin) on
+the backend host and restart it — the backend then mints storage URLs on the
+public origin itself, and the `publicStorageUrl` rewrite in
+`convex/images.ts` becomes removable.
 
 ---
 
