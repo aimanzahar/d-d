@@ -115,7 +115,7 @@ export const getContext = internalQuery({
       .take(10);
 
     // Recent transcript, newest first → reversed to chronological.
-    // deepseek-v4-pro has a 500K context window — a deep history window with
+    // grok-4.3 has a 500K-class context window — a deep history window with
     // near-full messages costs little and keeps the GM's continuity sharp.
     const recent = await ctx.db
       .query("messages")

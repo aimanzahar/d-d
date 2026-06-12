@@ -1,8 +1,9 @@
 "use client";
 
 // Full-screen transparent canvas that rolls one DiceEvent's worth of physical
-// dice into an invisible tray, then reports completion. Loaded with
-// next/dynamic({ ssr: false }) by DiceRollerHost.
+// dice into an invisible tray, reporting the moment every die settles
+// (onSettled — the reveal beat) and, after a linger, completion (onDone).
+// Loaded with next/dynamic({ ssr: false }) by DiceRollerHost.
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
@@ -16,16 +17,19 @@ const SAFETY_MS = 8000; // absolute ceiling — onDone always fires
 
 type DiceOverlayProps = {
   event: DiceEvent;
+  onSettled?: () => void;
   onDone: () => void;
 };
 
 type DieSpec = { sides: number; value: number; dimmed: boolean };
 
-export default function DiceOverlay({ event, onDone }: DiceOverlayProps) {
+export default function DiceOverlay({ event, onSettled, onDone }: DiceOverlayProps) {
   const onDoneRef = useRef(onDone);
+  const onSettledRef = useRef(onSettled);
   useEffect(() => {
     onDoneRef.current = onDone;
-  }, [onDone]);
+    onSettledRef.current = onSettled;
+  }, [onDone, onSettled]);
 
   const dice = useMemo<DieSpec[]>(
     () =>
@@ -49,6 +53,7 @@ export default function DiceOverlay({ event, onDone }: DiceOverlayProps) {
   const handleSettled = useCallback(() => {
     settledCount.current += 1;
     if (settledCount.current >= dice.length && lingerTimer.current === null) {
+      onSettledRef.current?.();
       lingerTimer.current = setTimeout(fireDone, LINGER_MS);
     }
   }, [dice.length, fireDone]);

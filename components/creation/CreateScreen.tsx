@@ -1,7 +1,7 @@
 "use client";
 
 import { animate, stagger } from "animejs";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -43,6 +43,8 @@ export function CreateScreen() {
   const [stepIndex, setStepIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inspiring, setInspiring] = useState(false);
+  const inspireBackstory = useAction(api.inspiration.generateBackstory);
 
   const data = useQuery(
     api.srdData.creationData,
@@ -101,6 +103,34 @@ export function CreateScreen() {
         );
       case "review":
         return draft.name.trim().length > 0;
+    }
+  }
+
+  // The muse writes the backstory whisper from the campaign seed + the hero
+  async function handleInspireBackstory() {
+    if (inspiring || !draft.raceIndex || !draft.classIndex) return;
+    setInspiring(true);
+    setError(null);
+    try {
+      const result = await inspireBackstory({
+        sessionToken: session.sessionToken,
+        campaignId: session.campaignId,
+        raceIndex: draft.raceIndex,
+        classIndex: draft.classIndex,
+        name: draft.name.trim() || undefined,
+        alignment: draft.alignment || undefined,
+      });
+      update({ notes: result.backstory });
+    } catch (e) {
+      const code =
+        e instanceof ConvexError ? (e.data as { code?: string })?.code : null;
+      setError(
+        code === "muse_cooldown"
+          ? "The muse needs a breath — try again in a few seconds."
+          : "The muse is silent. Try again.",
+      );
+    } finally {
+      setInspiring(false);
     }
   }
 
@@ -213,7 +243,20 @@ export function CreateScreen() {
                 </select>
               </label>
               <label className="block">
-                <Label>Backstory whisper (the GM will weave it in)</Label>
+                <span className="flex items-center justify-between">
+                  <Label>Backstory whisper (the GM will weave it in)</Label>
+                  <button
+                    type="button"
+                    className={`font-display text-[0.55rem] tracking-[0.2em] uppercase px-2 py-1 border border-arcane/40 text-arcane-soft hover:border-arcane cursor-pointer disabled:cursor-default disabled:hover:border-arcane/40 shrink-0 ml-3 ${
+                      inspiring ? "animate-flicker" : ""
+                    }`}
+                    disabled={inspiring}
+                    onClick={handleInspireBackstory}
+                    title="Let the muse whisper a backstory grown from the campaign seed"
+                  >
+                    {inspiring ? "consulting the muse…" : "✦ inspire me"}
+                  </button>
+                </span>
                 <TextArea
                   rows={4}
                   value={draft.notes}

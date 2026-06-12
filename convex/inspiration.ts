@@ -4,7 +4,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalMutation } from "./_generated/server";
-import { requireAccount } from "./lib/auth";
+import { requireAccount, requirePlayer } from "./lib/auth";
 import { chatJson } from "./lib/llm";
 
 const COOLDOWN_MS = 15_000;
@@ -99,6 +99,85 @@ export const generate = action({
     } catch (e) {
       if (e instanceof ConvexError) throw e;
       console.error("inspiration failed:", e);
+      throw new ConvexError({ code: "muse_silent" });
+    }
+  },
+});
+
+// Atomic cooldown gate for the backstory muse (per seat, not per account —
+// the create page is session-scoped) that also hands back the campaign seed.
+export const claimBackstoryMuse = internalMutation({
+  args: { sessionToken: v.string(), campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    const player = await requirePlayer(ctx, args.sessionToken, args.campaignId);
+    if (player.lastInspiredAt && Date.now() - player.lastInspiredAt < COOLDOWN_MS) {
+      throw new ConvexError({ code: "muse_cooldown" });
+    }
+    await ctx.db.patch(player._id, { lastInspiredAt: Date.now() });
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign) throw new ConvexError({ code: "campaign_not_found" });
+    return { campaignName: campaign.name, premise: campaign.premise };
+  },
+});
+
+// "Inspire me" for the forge's backstory whisper: a hook grown from the
+// campaign seed and the hero taking shape.
+export const generateBackstory = action({
+  args: {
+    sessionToken: v.string(),
+    campaignId: v.id("campaigns"),
+    raceIndex: v.string(),
+    classIndex: v.string(),
+    name: v.optional(v.string()),
+    alignment: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ backstory: string }> => {
+    const seed = await ctx.runMutation(internal.inspiration.claimBackstoryMuse, {
+      sessionToken: args.sessionToken,
+      campaignId: args.campaignId,
+    });
+
+    const hero = [
+      args.name?.trim() ? `named ${args.name.trim().slice(0, 40)}` : null,
+      `a ${args.raceIndex} ${args.classIndex}`,
+      args.alignment ? `leaning ${args.alignment}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    try {
+      const result = await chatJson<{ backstory: string }>({
+        schemaName: "backstory_whisper",
+        schema: {
+          type: "object",
+          properties: {
+            backstory: {
+              type: "string",
+              description:
+                'A D&D character backstory whisper: 2-4 short, fragmentary, evocative sentences (max 450 characters) in the style of "Raised by temple bells. Owes a debt to a man with no shadow." — concrete hooks, no plot resolutions, no names of campaign NPCs the player has not met',
+            },
+          },
+          required: ["backstory"],
+          additionalProperties: false,
+        },
+        temperature: 1.0,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You whisper Dungeons & Dragons character backstories. Vivid, specific, playable — never generic fantasy mush. The backstory must give the Game Master threads to pull on, not answers.",
+          },
+          {
+            role: "user",
+            content: `The campaign "${seed.campaignName}" is seeded by this premise: ${seed.premise}\n\nWhisper a backstory for ${hero} that ties them to this world. Return only the backstory.`,
+          },
+        ],
+      });
+      const backstory = result.backstory.trim().slice(0, 2000);
+      if (!backstory) throw new Error("empty backstory");
+      return { backstory };
+    } catch (e) {
+      if (e instanceof ConvexError) throw e;
+      console.error("backstory muse failed:", e);
       throw new ConvexError({ code: "muse_silent" });
     }
   },

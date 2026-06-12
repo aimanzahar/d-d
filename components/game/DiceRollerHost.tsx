@@ -2,8 +2,9 @@
 
 // Drains the gameStore dice queue one DiceEvent at a time. The head of the
 // queue is the live event: it gets a 3D DiceOverlay plus a DOM banner with the
-// actor, purpose, and (after the reveal beat) the animated total. The event is
-// dequeued only once its fade-out completes, which promotes the next one.
+// actor, purpose, and — only once every die has physically settled — the
+// animated total. The event is dequeued only once its fade-out completes,
+// which promotes the next one.
 
 import { animate } from "animejs";
 import dynamic from "next/dynamic";
@@ -12,7 +13,6 @@ import { useGameStore } from "@/stores/gameStore";
 
 const DiceOverlay = dynamic(() => import("../three/dice/DiceOverlay"), { ssr: false });
 
-const REVEAL_MS = 1600;
 const FADE_MS = 900;
 
 export function DiceRollerHost() {
@@ -25,12 +25,9 @@ export function DiceRollerHost() {
   const totalRef = useRef<HTMLDivElement | null>(null);
   const finishing = useRef(false);
 
-  // Reveal the total 1600ms after the event mounts (onDone may beat this).
-  useEffect(() => {
-    if (!current) return;
-    const timer = setTimeout(() => setRevealed(true), REVEAL_MS);
-    return () => clearTimeout(timer);
-  }, [current]);
+  // Reveal the total only when the dice have physically stopped (onDone's
+  // own setRevealed covers the SAFETY_MS ceiling and empty-dice events).
+  const handleSettled = useCallback(() => setRevealed(true), []);
 
   // Pop the total in when it appears.
   useEffect(() => {
@@ -72,7 +69,7 @@ export function DiceRollerHost() {
   return (
     // Keyed by rollId so back-to-back events remount with fresh opacity.
     <div ref={wrapRef} key={current.rollId}>
-      <DiceOverlay event={current} onDone={handleDone} />
+      <DiceOverlay event={current} onSettled={handleSettled} onDone={handleDone} />
       <div className="fixed bottom-24 inset-x-0 z-50 pointer-events-none flex justify-center">
         <div className="flex flex-col items-center gap-1 rounded border border-gold/30 bg-ink/85 px-8 py-4 backdrop-blur-sm">
           <p className="font-display text-xs uppercase tracking-[0.2em] text-gold">

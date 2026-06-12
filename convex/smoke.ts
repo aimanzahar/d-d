@@ -13,7 +13,7 @@ export const run = internalAction({
     const qdrantUrl = process.env.QDRANT_URL!;
     const qdrantKey = process.env.QDRANT_API_KEY!;
 
-    // 1. deepseek-v4-pro: streamed chat with a tool call (SSE reading in V8)
+    // 1. grok-4.3: streamed chat with a tool call (SSE reading in V8)
     try {
       const res = await fetch(`${base}/chat/completions`, {
         method: "POST",
@@ -22,7 +22,7 @@ export const run = internalAction({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "deepseek-v4-pro",
+          model: "grok-4.3",
           stream: true,
           max_tokens: 200,
           messages: [
@@ -285,7 +285,7 @@ export const maxTokensProbe = internalAction({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "deepseek-v4-pro",
+        model: "grok-4.3",
         max_tokens: args.budget,
         messages: [{ role: "user", content: "Reply with the single word: ok" }],
       }),
@@ -306,10 +306,10 @@ export const jsonSchemaProbe = internalAction({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "deepseek-v4-pro",
-        max_tokens: 384000,
+        model: "grok-4.3",
+        max_tokens: 15000,
         temperature: 1.0,
-        messages: [{ role: "user", content: "Give me one word as JSON: {\"word\": ...}" }],
+        messages: [{ role: "user", content: "Name one color as JSON: {\"word\": \"...\"}" }],
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -335,10 +335,10 @@ export const jsonObjectProbe = internalAction({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "deepseek-v4-pro",
+        model: "grok-4.3",
         max_tokens: 8000,
         messages: [
-          { role: "user", content: 'Reply with a single JSON object {"word": <one word>} and nothing else.' },
+          { role: "user", content: 'Name one color. Reply with a single JSON object {"word": "<the color>"} and nothing else.' },
         ],
         response_format: { type: "json_object" },
       }),

@@ -78,6 +78,7 @@ export default defineSchema({
     characterId: v.optional(v.id("characters")),
     userId: v.optional(v.id("users")), // owning account; absent = unclaimed legacy seat
     lastSeenAt: v.number(),
+    lastInspiredAt: v.optional(v.number()), // backstory-muse LLM-call cooldown
   })
     .index("by_token", ["sessionToken"])
     .index("by_campaign", ["campaignId"])

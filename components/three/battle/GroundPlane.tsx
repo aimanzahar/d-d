@@ -56,6 +56,7 @@ export function GroundPlane({ combat }: { combat: CombatView }) {
   useEffect(() => () => texture.dispose(), [texture]);
 
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (e.button !== 0) return; // non-left buttons are camera gestures, not game actions
     e.stopPropagation();
     const x = Math.floor(e.point.x + width / 2);
     const y = Math.floor(e.point.z + height / 2);

@@ -5,7 +5,7 @@
 # Emberquill — AI Game Master
 
 A realtime multiplayer D&D 5e game where an LLM runs the table. A host forges
-a campaign, friends join with a 6-character room code, and DeepSeek narrates,
+a campaign, friends join with a 6-character room code, and Grok narrates,
 adjudicates, rolls (server-side, always), and commands the monsters — while
 every player watches the same world update live.
 
@@ -13,7 +13,7 @@ every player watches the same world update live.
 
 ## What's inside
 
-- **AI Game Master** (`deepseek-v4-pro` via an OpenAI-compatible gateway):
+- **AI Game Master** (`grok-4.3` via an OpenAI-compatible gateway):
   streams narration to all players simultaneously (token chunks append to a
   Convex document everyone subscribes to) and changes the world only through
   17 validated tools — dice, HP with full death rules, conditions, inventory,
@@ -48,7 +48,7 @@ every player watches the same world update live.
 
 Next.js 16 (App Router) · React 19 · Tailwind v4 · anime.js 4 · three.js +
 R3F 9 + drei + rapier · zustand · Convex (self-hosted) · Qdrant · OpenAI-compatible LLM
-gateway (DeepSeek / Gemini embeddings / gpt-image-2).
+gateway (Grok / Gemini embeddings / gpt-image-2).
 
 ## Running it (Docker — easiest)
 

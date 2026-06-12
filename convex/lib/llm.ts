@@ -1,15 +1,17 @@
 // LLM gateway access (OpenAI-compatible) via plain fetch — runs in
 // Convex's V8 runtime. No SDK: smoke-tested directly.
 
-export const GM_MODEL = "deepseek-v4-pro";
+export const GM_MODEL = "grok-4.3";
 export const EMBEDDING_MODEL = "gemini-embedding-2-preview";
 export const EMBEDDING_DIM = 3072;
 export const IMAGE_MODEL = "gpt-image-2";
 
-// Gateway model limits: deepseek-v4-pro has a 500K context window and 384K
-// max output (reasoning tokens count against output — never starve it);
+// Gateway model limits: grok-4.3 has a large (500K-class) context window;
+// output is capped at 15K (plenty for narration and structured side-channels).
+// NOTE: the gateway's "grok-4.2-fast" route does NOT support tool calls —
+// probed 2026-06-12; grok-4.3 streams them correctly.
 // gemini-embedding-2-preview accepts 8,192-token inputs.
-export const MAX_OUTPUT_TOKENS = 384_000;
+export const MAX_OUTPUT_TOKENS = 15_000;
 export const EMBED_CHAR_BUDGET = 24_000; // ~6K tokens, safe under the 8,192 cap
 
 function env(name: string): string {

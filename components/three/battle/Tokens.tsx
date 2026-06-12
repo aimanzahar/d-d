@@ -113,6 +113,7 @@ function Token({
   });
 
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (e.button !== 0) return; // non-left buttons are camera gestures, not game actions
     e.stopPropagation();
     const { targetMode, onMonsterClick } = useGameStore.getState();
     if (

@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalAction, mutation, query } from "./_generated/server";
+import { internalAction, mutation, query, type MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import {
   newInviteCode,
   newToken,
@@ -215,65 +216,105 @@ export const reissueToken = mutation({
 
 // Host-only: delete the campaign and every trace of it — tables, stored
 // images, and Qdrant memories (G4).
+// Cascade-deletes a campaign and everything it owns (incl. stored image
+// files); Qdrant memories purge in a scheduled fire-and-forget action.
+async function purgeCampaign(ctx: MutationCtx, campaignId: Id<"campaigns">) {
+  const images = await ctx.db
+    .query("images")
+    .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+    .collect();
+  for (const image of images) {
+    if (image.storageId) await ctx.storage.delete(image.storageId);
+    await ctx.db.delete(image._id);
+  }
+  for (const doc of await ctx.db
+    .query("players")
+    .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+    .collect()) {
+    await ctx.db.delete(doc._id);
+  }
+  for (const doc of await ctx.db
+    .query("characters")
+    .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+    .collect()) {
+    await ctx.db.delete(doc._id);
+  }
+  for (const doc of await ctx.db
+    .query("messages")
+    .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+    .collect()) {
+    await ctx.db.delete(doc._id);
+  }
+  for (const doc of await ctx.db
+    .query("rolls")
+    .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+    .collect()) {
+    await ctx.db.delete(doc._id);
+  }
+  const combats = await ctx.db
+    .query("combats")
+    .withIndex("by_campaign_status", (q) => q.eq("campaignId", campaignId))
+    .collect();
+  for (const combat of combats) {
+    const monsters = await ctx.db
+      .query("monsters")
+      .withIndex("by_combat", (q) => q.eq("combatId", combat._id))
+      .collect();
+    for (const m of monsters) await ctx.db.delete(m._id);
+    await ctx.db.delete(combat._id);
+  }
+  const flags = await ctx.db
+    .query("questFlags")
+    .withIndex("by_campaign_key", (q) => q.eq("campaignId", campaignId))
+    .collect();
+  for (const flag of flags) await ctx.db.delete(flag._id);
+  await ctx.db.delete(campaignId);
+  await ctx.scheduler.runAfter(0, internal.campaigns.purgeMemories, {
+    campaignId: String(campaignId),
+  });
+}
+
 export const deleteCampaign = mutation({
   args: { sessionToken: v.string(), campaignId: v.id("campaigns") },
   handler: async (ctx, args) => {
     await requireHost(ctx, args.sessionToken, args.campaignId);
+    await purgeCampaign(ctx, args.campaignId);
+  },
+});
 
-    const images = await ctx.db
-      .query("images")
-      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
-      .collect();
-    for (const image of images) {
-      if (image.storageId) await ctx.storage.delete(image.storageId);
-      await ctx.db.delete(image._id);
-    }
-    for (const doc of await ctx.db
+// Account-scoped exit for the landing shelf. The server decides by actual
+// role: the host's departure deletes the whole campaign; anyone else just
+// gives up their seat (and their hero).
+export const departCampaign = mutation({
+  args: { accountToken: v.string(), inviteCode: v.string() },
+  handler: async (ctx, args) => {
+    const { user } = await requireAccount(ctx, args.accountToken);
+    const campaign = await ctx.db
+      .query("campaigns")
+      .withIndex("by_inviteCode", (q) =>
+        q.eq("inviteCode", args.inviteCode.trim().toUpperCase()),
+      )
+      .unique();
+    if (!campaign) throw new ConvexError({ code: "campaign_not_found" });
+    const players = await ctx.db
       .query("players")
-      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
-      .collect()) {
-      await ctx.db.delete(doc._id);
-    }
-    for (const doc of await ctx.db
-      .query("characters")
-      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
-      .collect()) {
-      await ctx.db.delete(doc._id);
-    }
-    for (const doc of await ctx.db
-      .query("messages")
-      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
-      .collect()) {
-      await ctx.db.delete(doc._id);
-    }
-    for (const doc of await ctx.db
-      .query("rolls")
-      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
-      .collect()) {
-      await ctx.db.delete(doc._id);
-    }
-    const combats = await ctx.db
-      .query("combats")
-      .withIndex("by_campaign_status", (q) => q.eq("campaignId", args.campaignId))
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
-    for (const combat of combats) {
-      const monsters = await ctx.db
-        .query("monsters")
-        .withIndex("by_combat", (q) => q.eq("combatId", combat._id))
-        .collect();
-      for (const m of monsters) await ctx.db.delete(m._id);
-      await ctx.db.delete(combat._id);
+    const player = players.find((p) => p.campaignId === campaign._id);
+    if (!player) throw new ConvexError({ code: "not_a_member" });
+
+    if (player.isHost) {
+      await purgeCampaign(ctx, campaign._id);
+      return { deleted: true };
     }
-    const flags = await ctx.db
-      .query("questFlags")
-      .withIndex("by_campaign_key", (q) => q.eq("campaignId", args.campaignId))
-      .collect();
-    for (const flag of flags) await ctx.db.delete(flag._id);
-    await ctx.db.delete(args.campaignId);
-    // Qdrant memories go in a fire-and-forget action
-    await ctx.scheduler.runAfter(0, internal.campaigns.purgeMemories, {
-      campaignId: String(args.campaignId),
-    });
+    // Leaving mid-combat can strand a stale PC entry in the initiative list —
+    // same shape as a dead/removed character; the engine tolerates it.
+    if (player.characterId) {
+      const character = await ctx.db.get(player.characterId);
+      if (character) await ctx.db.delete(character._id);
+    }
+    await ctx.db.delete(player._id);
+    return { deleted: false };
   },
 });
 

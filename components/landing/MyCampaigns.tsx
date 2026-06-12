@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { useAccount } from "@/hooks/useAccount";
 import { saveSessionToken } from "@/lib/session";
@@ -16,8 +16,15 @@ export function MyCampaigns() {
   const { accountToken } = useAccount();
   const rows = useQuery(api.accounts.myCampaigns, accountToken ? { accountToken } : "skip");
   const rejoin = useMutation(api.accounts.rejoinCampaign);
+  const depart = useMutation(api.campaigns.departCampaign);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Two-click confirm: first click arms the row, second fires; disarms after 3s
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+  }, []);
 
   async function handleRejoin(inviteCode: string) {
     if (!accountToken) return;
@@ -30,6 +37,27 @@ export function MyCampaigns() {
       router.push(`/c/${result.inviteCode}/lobby`);
     } catch {
       setError("That table has been cleared away.");
+      setBusy(false);
+    }
+  }
+
+  async function handleDepart(inviteCode: string) {
+    if (!accountToken || busy) return;
+    if (confirming !== inviteCode) {
+      setConfirming(inviteCode);
+      if (confirmTimer.current) clearTimeout(confirmTimer.current);
+      confirmTimer.current = setTimeout(() => setConfirming(null), 3000);
+      return;
+    }
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    setConfirming(null);
+    setBusy(true);
+    setError(null);
+    try {
+      await depart({ accountToken, inviteCode }); // reactive query drops the row
+    } catch {
+      setError("The candles refused to go out. Try again.");
+    } finally {
       setBusy(false);
     }
   }
@@ -83,6 +111,29 @@ export function MyCampaigns() {
               >
                 Rejoin
               </Button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => handleDepart(row.inviteCode)}
+                title={
+                  row.isHost
+                    ? "Delete this campaign for everyone — there is no undo"
+                    : "Give up your seat (and your hero) at this table"
+                }
+                className={`font-display text-[0.55rem] tracking-[0.2em] uppercase px-2 py-1 border cursor-pointer disabled:cursor-default ${
+                  confirming === row.inviteCode
+                    ? "border-blood text-blood animate-flicker"
+                    : "border-blood/30 text-blood/60 hover:border-blood/70 hover:text-blood"
+                }`}
+              >
+                {confirming === row.inviteCode
+                  ? row.isHost
+                    ? "Delete forever?"
+                    : "Leave the table?"
+                  : row.isHost
+                    ? "Delete"
+                    : "Leave"}
+              </button>
             </div>
           </div>
         ))}
