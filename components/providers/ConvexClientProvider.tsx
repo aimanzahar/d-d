@@ -1,5 +1,6 @@
 "use client";
 
+import "@/lib/insecureContext"; // crypto.randomUUID shim for plain-HTTP LAN testing
 import { ConvexProvider, ConvexReactClient } from "convex/react";
 import type { ReactNode } from "react";
 

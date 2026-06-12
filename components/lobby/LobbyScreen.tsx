@@ -9,6 +9,7 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useAnimeScope } from "@/hooks/useAnimeScope";
 import { useSession } from "@/hooks/useSession";
+import { copyText } from "@/lib/insecureContext";
 import { Button } from "@/components/ui/Button";
 import { OrnateRule } from "@/components/ui/OrnateRule";
 import { Panel } from "@/components/ui/Panel";
@@ -26,9 +27,7 @@ function InviteCodeCard({ code }: { code: string }) {
         className="font-dice text-4xl tracking-[0.45em] gold-text cursor-pointer pl-2"
         title="Copy invite"
         onClick={() => {
-          void navigator.clipboard.writeText(
-            `${window.location.origin}/c/${code}/join`,
-          );
+          void copyText(`${window.location.origin}/c/${code}/join`);
           setCopied(true);
           setTimeout(() => setCopied(false), 1600);
         }}
@@ -101,7 +100,7 @@ export function LobbyScreen() {
       playerId: playerId as Id<"players">,
     });
     const url = `${window.location.origin}/c/${session.inviteCode}/restore?t=${result.sessionToken}`;
-    void navigator.clipboard.writeText(url);
+    void copyText(url);
     setReissuedFor({ playerId, url });
     setTimeout(() => setReissuedFor(null), 5000);
   }

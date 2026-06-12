@@ -45,7 +45,9 @@ export function GameScreen() {
 
       {/* UI overlay — pointer-events pass through to the canvas except panels */}
       <div className="absolute inset-0 z-10 flex flex-col pointer-events-none">
-        <header className="pointer-events-auto flex items-center gap-4 px-5 h-12 border-b border-gold-dim/30 bg-ink-soft/70 backdrop-blur shrink-0">
+        <header className="pointer-events-auto flex items-center gap-3 px-4 h-12 border-b border-gold-dim/30 bg-ink-soft/70 backdrop-blur shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/logo-96.png" alt="" className="w-7 h-7 rounded-full" aria-hidden />
           <h1 className="font-display text-sm tracking-[0.15em] text-gold truncate">
             {campaign.name}
           </h1>

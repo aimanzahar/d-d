@@ -1,3 +1,11 @@
+<p align="center">
+  <img src="public/brand/hero.jpg" alt="Emberquill — a candle-lit war table with a glowing d20 beneath a red comet" width="100%" />
+</p>
+
+<p align="center">
+  <img src="public/brand/logo-512.png" alt="Emberquill emblem" width="140" />
+</p>
+
 # Emberquill — AI Game Master
 
 A realtime multiplayer D&D 5e game where an LLM runs the table. A host forges

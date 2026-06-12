@@ -113,6 +113,20 @@ export function LandingScreen() {
 
   return (
     <div ref={root} className="relative flex-1 flex flex-col items-center justify-center px-6 py-16 overflow-hidden">
+      {/* hero art backdrop, masked into the ink */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-40"
+        style={{
+          backgroundImage: "url(/brand/hero.jpg)",
+          backgroundSize: "cover",
+          backgroundPosition: "center 30%",
+          maskImage:
+            "radial-gradient(95% 80% at 50% 35%, black 30%, transparent 78%)",
+          WebkitMaskImage:
+            "radial-gradient(95% 80% at 50% 35%, black 30%, transparent 78%)",
+        }}
+        aria-hidden
+      />
       {/* rising embers */}
       <div className="absolute inset-x-0 bottom-0 h-[55vh] pointer-events-none" aria-hidden>
         {Array.from({ length: 20 }).map((_, i) => (
@@ -128,7 +142,13 @@ export function LandingScreen() {
         ))}
       </div>
 
-      <p className="hero-rise font-display text-[0.7rem] tracking-[0.5em] text-gold-dim uppercase mb-5 opacity-0">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/brand/logo-512.png"
+        alt="Emberquill emblem — a quill crossed with a d20"
+        className="hero-rise relative w-24 h-24 sm:w-28 sm:h-28 mb-4 opacity-0 rounded-full shadow-[0_0_48px_rgba(232,114,42,0.25)]"
+      />
+      <p className="hero-rise relative font-display text-[0.7rem] tracking-[0.5em] text-gold-dim uppercase mb-5 opacity-0">
         An AI Game Master awaits
       </p>
 
