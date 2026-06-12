@@ -47,17 +47,17 @@ export const getTurnDigest = internalQuery({
       .query("messages")
       .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
       .order("desc")
-      .take(8);
+      .take(16);
     const lead = recent
       .filter((m) => m._id !== args.gmMessageId && m._creationTime < gmMessage._creationTime)
       .reverse()
-      .map((m) => `${m.characterName ?? m.kind}: ${m.content.slice(0, 300)}`)
+      .map((m) => `${m.characterName ?? m.kind}: ${m.content.slice(0, 1200)}`)
       .join("\n");
     return {
       summary: campaign.summary,
       location: campaign.location.name,
       lead,
-      narration: gmMessage.content.slice(0, 4000),
+      narration: gmMessage.content.slice(0, 16_000),
     };
   },
 });
@@ -65,7 +65,7 @@ export const getTurnDigest = internalQuery({
 export const saveSummary = internalMutation({
   args: { campaignId: v.id("campaigns"), summary: v.string() },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.campaignId, { summary: args.summary.slice(0, 2000) });
+    await ctx.db.patch(args.campaignId, { summary: args.summary.slice(0, 8000) });
   },
 });
 
@@ -82,7 +82,8 @@ export const memorizeTurn = internalAction({
       }>({
         schemaName: "turn_memory",
         schema: MEMORY_SCHEMA,
-        maxTokens: 900,
+        // default cap = full model output limit — reasoning tokens count
+        // against it, so a tight cap here starves the JSON just like turns
         messages: [
           {
             role: "system",

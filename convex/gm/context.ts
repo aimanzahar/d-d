@@ -24,7 +24,7 @@ export function condensedCharacter(c: Doc<"characters">): string {
     : "—";
   const conditions = c.conditions.map((x) => x.name).join(", ") || "—";
   const gear = c.inventory
-    .slice(0, 10)
+    .slice(0, 25)
     .map((i) => `${i.name}${i.quantity > 1 ? `×${i.quantity}` : ""}`)
     .join(", ");
   return [
@@ -32,7 +32,7 @@ export function condensedCharacter(c: Doc<"characters">): string {
     `  HP ${c.currentHp}/${c.maxHp}${c.tempHp ? ` (+${c.tempHp} temp)` : ""} | AC ${c.ac} | speed ${c.speed}ft | passive Perception ${passivePerception} | prof +${profBonus(c.level)}`,
     `  ${mods} | saves: ${c.proficiencies.savingThrows.map((s) => s.toUpperCase()).join(", ")}`,
     `  skills: ${c.proficiencies.skills.join(", ") || "—"} | slots: ${slots} | conditions: ${conditions}`,
-    `  gear: ${gear} | ${c.currency.gp} gp${c.notes ? ` | backstory: ${c.notes.slice(0, 160)}` : ""}`,
+    `  gear: ${gear} | ${c.currency.gp} gp${c.notes ? ` | backstory: ${c.notes.slice(0, 600)}` : ""}`,
   ].join("\n");
 }
 
@@ -114,25 +114,27 @@ export const getContext = internalQuery({
       )
       .take(10);
 
-    // Recent transcript, newest first → reversed to chronological
+    // Recent transcript, newest first → reversed to chronological.
+    // deepseek-v4-pro has a 500K context window — a deep history window with
+    // near-full messages costs little and keeps the GM's continuity sharp.
     const recent = await ctx.db
       .query("messages")
       .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
       .order("desc")
-      .take(20);
+      .take(120);
     const history = recent
       .reverse()
       .filter((m) => !unprocessed.some((u) => u._id === m._id))
       .map((m) => {
         const speaker =
           m.kind === "gm" ? "GM" : m.kind === "system" ? "SYSTEM" : m.characterName ?? "?";
-        const content = m.kind === "gm" ? m.content.slice(0, 800) : m.content.slice(0, 400);
+        const content = m.kind === "gm" ? m.content.slice(0, 4000) : m.content.slice(0, 2000);
         return `${speaker}${m.ooc ? " (table talk)" : ""}: ${content}`;
       });
 
     const newActions = unprocessed.map((m) => {
       const speaker = m.kind === "system" ? "SYSTEM" : m.characterName ?? "?";
-      return `${speaker}: ${m.content.slice(0, 600)}`;
+      return `${speaker}: ${m.content.slice(0, 2000)}`;
     });
 
     const contextBlock = [

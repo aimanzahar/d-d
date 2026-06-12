@@ -3,7 +3,15 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { internalAction, internalMutation } from "../_generated/server";
-import { chatStream, embed, type ChatMessage, type StreamResult, type ToolCall } from "../lib/llm";
+import {
+  chatStream,
+  embed,
+  EMBED_CHAR_BUDGET,
+  MAX_OUTPUT_TOKENS,
+  type ChatMessage,
+  type StreamResult,
+  type ToolCall,
+} from "../lib/llm";
 import { search } from "../lib/qdrant";
 import { BASE_PROMPT, COMBAT_ADDENDUM, EXPLORATION_ADDENDUM } from "./prompt";
 import { dispatchTool, TOOL_DEFS } from "./tools";
@@ -12,9 +20,10 @@ const MAX_ITERATIONS = 6;
 const TURN_DEADLINE_MS = 7 * 60 * 1000;
 const FLUSH_CHARS = 300;
 const FLUSH_MS = 250;
-// Reasoning tokens count against max_tokens, so keep enough headroom that the
-// model's chain-of-thought can never starve the narration itself.
-const GM_MAX_TOKENS = 3000;
+// Reasoning tokens count against max_tokens, so give the model its full
+// output limit — it's a cap, not a target; chain-of-thought never starves
+// the narration itself.
+const GM_MAX_TOKENS = MAX_OUTPUT_TOKENS;
 
 // Verifies this scheduled run still owns the lock (kills stale duplicates).
 export const claimTurn = internalMutation({
@@ -96,7 +105,7 @@ export const respond = internalAction({
       try {
         if (context.newActionsText) {
           const [vector] = await embed([
-            `${context.newActionsText}\n(at ${context.locationName})`.slice(0, 2000),
+            `${context.newActionsText}\n(at ${context.locationName})`.slice(0, EMBED_CHAR_BUDGET),
           ]);
           const [memories, rules] = await Promise.all([
             search({ vector, campaignId: args.campaignId, kinds: ["scene", "npc", "lore"], limit: 6 }),
@@ -107,7 +116,7 @@ export const respond = internalAction({
             .map((h) => `[${h.payload.kind}] ${h.payload.text}`);
           const ruleLines = rules
             .filter((h) => h.score > 0.55)
-            .map((h) => `[rule: ${h.payload.title}] ${h.payload.text.slice(0, 600)}`);
+            .map((h) => `[rule: ${h.payload.title}] ${h.payload.text.slice(0, 2000)}`);
           if (memoryLines.length > 0) {
             memoryBlock += `\n\n# RECALLED MEMORIES (older events that may be relevant)\n${memoryLines.join("\n")}`;
           }

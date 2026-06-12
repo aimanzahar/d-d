@@ -6,6 +6,12 @@ export const EMBEDDING_MODEL = "gemini-embedding-2-preview";
 export const EMBEDDING_DIM = 3072;
 export const IMAGE_MODEL = "gpt-image-2";
 
+// Gateway model limits: deepseek-v4-pro has a 500K context window and 384K
+// max output (reasoning tokens count against output — never starve it);
+// gemini-embedding-2-preview accepts 8,192-token inputs.
+export const MAX_OUTPUT_TOKENS = 384_000;
+export const EMBED_CHAR_BUDGET = 24_000; // ~6K tokens, safe under the 8,192 cap
+
 function env(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing env var ${name} (set with npx convex env set)`);
@@ -177,7 +183,7 @@ export async function chatJson<T>(opts: {
     },
     body: JSON.stringify({
       model: GM_MODEL,
-      max_tokens: opts.maxTokens ?? 800,
+      max_tokens: opts.maxTokens ?? MAX_OUTPUT_TOKENS,
       temperature: opts.temperature ?? 0.3,
       messages: opts.messages,
       response_format: {
