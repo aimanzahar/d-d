@@ -230,8 +230,10 @@ export const respond = internalAction({
 
       // Combat safety net: if a monster is still the active combatant after
       // the GM finished (and we're not waiting on a player roll), the engine
-      // advances the turn itself so the fight never stalls.
-      if (context.mode === "combat" && !endTurn) {
+      // advances the turn itself so the fight never stalls. Checked on every
+      // turn — context.mode is a stale snapshot when start_combat ran mid-
+      // turn; the mutation self-guards on live state and queued work.
+      if (!endTurn) {
         await ctx.runMutation(internal.combat.autoAdvanceIfMonsterStuck, {
           campaignId: args.campaignId,
         });

@@ -859,6 +859,15 @@ export const hostRemovePlayer = mutation({
 export const autoAdvanceIfMonsterStuck = internalMutation({
   args: { campaignId: v.id("campaigns") },
   handler: async (ctx, args) => {
+    // Unprocessed messages mean a GM turn is about to chain — it will play
+    // the monster properly; skipping here would steal its turn.
+    const pending = await ctx.db
+      .query("messages")
+      .withIndex("by_campaign_unprocessed", (q) =>
+        q.eq("campaignId", args.campaignId).eq("processed", false),
+      )
+      .first();
+    if (pending) return { advanced: false };
     const state = await activeCombat(ctx, args.campaignId);
     if (!state) return { advanced: false };
     const entry = state.combat.initiative[state.combat.activeIndex];
@@ -1062,6 +1071,25 @@ export const toolStartCombat = internalMutation({
     });
 
     const first = initiative[0];
+    if (first.kind === "monster") {
+      // Engine guarantee: don't rely on the model resolving the opener in
+      // this same response. Queue a directive (same shape advanceAndSignal
+      // uses) so finishTurn chains a fresh combat-context turn that plays
+      // the monster if this one didn't.
+      await ctx.db.insert("messages", {
+        campaignId: args.campaignId,
+        kind: "system",
+        content:
+          `Round 1: ${first.name} opens the fight. Check COMBAT STATE for whose turn it is — ` +
+          `if a monster is active, resolve its turn now (move_token and npc_attack as needed, then advance_turn), ` +
+          `continuing through consecutive monster turns until a player is up; ` +
+          `if a player is already up, the opener was handled — briefly set the scene and stop.`,
+        status: "complete",
+        ooc: true, // GM directive, hidden from players
+        processed: false,
+      });
+      await enqueueGm(ctx, args.campaignId);
+    }
     return {
       ok: true,
       map: preset.key,
