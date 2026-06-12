@@ -7,5 +7,6 @@ services:
         NEXT_PUBLIC_CONVEX_URL: https://convex.zahar.my
     image: emberquill:latest
     ports:
-      - "3000:3000"
+      # override with EMBERQUILL_PORT=3002 docker compose up -d
+      - "${EMBERQUILL_PORT:-3000}:3000"
     restart: unless-stopped
