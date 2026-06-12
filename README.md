@@ -40,7 +40,22 @@ Next.js 16 (App Router) · React 19 · Tailwind v4 · anime.js 4 · three.js +
 R3F 9 + drei + rapier · zustand · Convex (self-hosted) · Qdrant · OpenAI-compatible LLM
 gateway (DeepSeek / Gemini embeddings / gpt-image-2).
 
-## Running it
+## Running it (Docker — easiest)
+
+```bash
+git clone https://github.com/aimanzahar/d-d.git && cd d-d
+docker compose up -d --build
+# open http://localhost:3000
+```
+
+That's it — the image only serves the web app; it talks to the already-running
+Convex/Qdrant/LLM backends. To point the frontend at a different Convex
+deployment, change the `NEXT_PUBLIC_CONVEX_URL` build arg in
+`docker-compose.yml` (it is baked into the client bundle at build time, so
+rebuild after changing it). Backend function pushes and seeding still happen
+from a dev checkout with `npx convex dev` (see below).
+
+## Running it (local dev)
 
 ```bash
 npm install

@@ -1,0 +1,11 @@
+services:
+  emberquill:
+    build:
+      context: .
+      args:
+        # Inlined into the client bundle at build time
+        NEXT_PUBLIC_CONVEX_URL: https://convex.zahar.my
+    image: emberquill:latest
+    ports:
+      - "3000:3000"
+    restart: unless-stopped

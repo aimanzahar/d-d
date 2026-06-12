@@ -1,0 +1,11 @@
+# never bake secrets or local state into the image
+.env*
+.git
+.next
+node_modules
+.playwright-mcp
+*.png
+*.log
+README.md
+Dockerfile
+docker-compose.yml
