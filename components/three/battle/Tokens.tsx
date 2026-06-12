@@ -3,13 +3,14 @@
 // Player and monster tokens: capsule body, base ring, billboarded HP bar +
 // label, invisible click hitbox. Tokens glide between cells with maath
 // damping; the active token's ring pulses and casts a soft point light.
+// Dead tokens topple sideways, sink through the floor, and stop rendering.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
 import { Billboard } from "@react-three/drei";
-import { damp3 } from "maath/easing";
+import { damp, damp3 } from "maath/easing";
 import { useGameStore, type TokenView } from "@/stores/gameStore";
 
 // Nameplates are canvas-texture sprites rather than troika <Text> — troika
@@ -83,6 +84,18 @@ function Token({
   const target = useRef(new THREE.Vector3());
   // Capture spawn cell once so re-renders never snap the gliding group back.
   const [spawn] = useState(() => ({ x: token.x, y: token.y }));
+  // Death animation: topple, then sink, then stop rendering. A token that is
+  // already dead at mount (page reload mid-combat) is buried immediately.
+  const [gone, setGone] = useState(token.dead);
+  const sinking = useRef(false);
+
+  // Resurrection (or a fresh snapshot un-marking death): rise from the grave.
+  useEffect(() => {
+    if (!token.dead) {
+      sinking.current = false;
+      setGone(false); // remounts the group fresh if it had fully sunk
+    }
+  }, [token.dead]);
 
   // Ring material is per-token (NOT module-cached) because the active pulse
   // mutates emissiveIntensity — sharing it would pulse every token's ring.
@@ -101,8 +114,24 @@ function Token({
   useFrame((state, delta) => {
     const group = groupRef.current;
     if (!group) return;
+    if (token.dead) {
+      // Topple sideways onto the floor, then sink through it.
+      if (!sinking.current) {
+        damp(group.rotation, "z", Math.PI / 2, 0.12, delta);
+        damp(group.position, "y", 0.18, 0.12, delta);
+        if (group.rotation.z > 1.4) sinking.current = true;
+      } else {
+        damp(group.position, "y", -1.3, 0.45, delta);
+        if (group.position.y <= -1.25) setGone(true);
+      }
+      const deadRing = ringRef.current?.material as THREE.MeshStandardMaterial | undefined;
+      if (deadRing) deadRing.emissiveIntensity = RING_BASE_INTENSITY;
+      return;
+    }
     target.current.set(token.x - width / 2 + 0.5, 0, token.y - height / 2 + 0.5);
     damp3(group.position, target.current, 0.18, delta);
+    // Recover upright if a topple was interrupted by resurrection.
+    if (group.rotation.z !== 0) damp(group.rotation, "z", 0, 0.12, delta);
     // Pulse (or rest) the ring through the mesh ref so render values stay frozen.
     const ring = ringRef.current?.material as THREE.MeshStandardMaterial | undefined;
     if (ring) {
@@ -136,6 +165,8 @@ function Token({
   const fillMaterial =
     ratio > 0.5 ? barFillGreen : ratio > 0.25 ? barFillOrange : barFillRed;
 
+  if (gone) return null;
+
   return (
     <group
       ref={groupRef}
@@ -158,13 +189,17 @@ function Token({
         rotation-x={-Math.PI / 2}
         position={[0, 0.03, 0]}
       />
-      <mesh
-        geometry={hitboxGeometry}
-        material={hitboxMaterial}
-        position={[0, 0.8, 0]}
-        onPointerDown={handlePointerDown}
-      />
-      {token.active && (
+      {/* No hitbox once dead — findMonster's startsWith fallback could
+          silently retarget a click on dead "Goblin 1" to "Goblin 12". */}
+      {!token.dead && (
+        <mesh
+          geometry={hitboxGeometry}
+          material={hitboxMaterial}
+          position={[0, 0.8, 0]}
+          onPointerDown={handlePointerDown}
+        />
+      )}
+      {token.active && !token.dead && (
         <pointLight
           position={[0, 1.1, 0]}
           color={token.kind === "monster" ? "#ff6a4d" : "#e8c87a"}
@@ -172,19 +207,21 @@ function Token({
           distance={3}
         />
       )}
-      <Billboard position={[0, 1.45, 0]}>
-        <mesh geometry={barBgGeometry} material={barBgMaterial} />
-        <mesh
-          geometry={barFillGeometry}
-          material={fillMaterial}
-          position={[-0.4 + 0.4 * ratio, 0, 0.001]}
-          scale={[ratio, 1, 1]}
-        />
-        <mesh position={[0, 0.26, 0]}>
-          <planeGeometry args={[1.4, 0.35]} />
-          <meshBasicMaterial map={labelTexture(token.label)} transparent depthWrite={false} />
-        </mesh>
-      </Billboard>
+      {!token.dead && (
+        <Billboard position={[0, 1.45, 0]}>
+          <mesh geometry={barBgGeometry} material={barBgMaterial} />
+          <mesh
+            geometry={barFillGeometry}
+            material={fillMaterial}
+            position={[-0.4 + 0.4 * ratio, 0, 0.001]}
+            scale={[ratio, 1, 1]}
+          />
+          <mesh position={[0, 0.26, 0]}>
+            <planeGeometry args={[1.4, 0.35]} />
+            <meshBasicMaterial map={labelTexture(token.label)} transparent depthWrite={false} />
+          </mesh>
+        </Billboard>
+      )}
     </group>
   );
 }
@@ -194,11 +231,9 @@ export function Tokens() {
   if (!combat) return null;
   return (
     <group>
-      {combat.tokens
-        .filter((t) => !t.dead)
-        .map((t) => (
-          <Token key={t.id} token={t} width={combat.width} height={combat.height} />
-        ))}
+      {combat.tokens.map((t) => (
+        <Token key={t.id} token={t} width={combat.width} height={combat.height} />
+      ))}
     </group>
   );
 }

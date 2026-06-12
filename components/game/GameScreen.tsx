@@ -7,6 +7,7 @@ import { api } from "@/convex/_generated/api";
 import { withBasePath } from "@/lib/basePath";
 import { usePanelHeight } from "@/hooks/usePanelHeight";
 import { useSession } from "@/hooks/useSession";
+import { useGameStore } from "@/stores/gameStore";
 import { ActionInput } from "./ActionInput";
 import { CombatHUD } from "@/components/combat/CombatHUD";
 import { DiceRollerHost } from "./DiceRollerHost";
@@ -54,6 +55,9 @@ function ResizableChatPanel({ gmThinking, ended }: { gmThinking: boolean; ended:
 export function GameScreen() {
   const session = useSession();
   const router = useRouter();
+  // Store mode, not the live query: ConvexBridge defers it while dice play,
+  // so the combat HUD doesn't vanish ahead of the final blow's animation.
+  const storeMode = useGameStore((s) => s.mode);
   const campaign = useQuery(api.campaigns.get, {
     sessionToken: session.sessionToken,
     inviteCode: session.inviteCode,
@@ -102,7 +106,7 @@ export function GameScreen() {
           </div>
 
           <main className="flex-1 flex flex-col min-w-0">
-            {campaign.mode === "combat" && <CombatHUD />}
+            {storeMode === "combat" && <CombatHUD />}
             <div className="pointer-events-auto">
               <RollPrompt />
             </div>
