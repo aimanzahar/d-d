@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
+import { ABILITY_KEYS, abilityMod, profBonus, XP_THRESHOLDS } from "@/convex/lib/rules5e";
 import { Panel } from "@/components/ui/Panel";
 import { useSession } from "@/hooks/useSession";
 import { FALLBACK_ICON, iconForItem } from "@/lib/itemIcons";
@@ -274,6 +275,95 @@ function BagGrid({
   );
 }
 
+// Ability scores, defenses, XP progress, and (for casters) spell slots —
+// the read-only character sheet that rides atop the pack window.
+function CharacterSheetSummary({ character }: { character: Doc<"characters"> }) {
+  const lvl = character.level;
+  const nextFloor = XP_THRESHOLDS[lvl + 1];
+  const atMax = nextFloor === undefined;
+  const curFloor = XP_THRESHOLDS[lvl] ?? 0;
+  const span = atMax ? 1 : nextFloor - curFloor;
+  const xpPct = atMax ? 100 : Math.max(0, Math.min(100, ((character.xp - curFloor) / span) * 100));
+  const slots = character.spellcasting?.slots ?? [];
+  const hasSlots = slots.some((s) => s.max > 0);
+
+  return (
+    <div className="border-b border-gold-dim/30">
+      <div className="grid grid-cols-6 gap-1.5 px-3.5 py-3">
+        {ABILITY_KEYS.map((k) => {
+          const m = abilityMod(character.abilities[k]);
+          return (
+            <div
+              key={k}
+              className="flex flex-col items-center border border-gold-dim/30 bg-ink/40 py-1.5"
+            >
+              <span className="font-display text-[0.5rem] tracking-[0.15em] uppercase text-gold-dim">
+                {k}
+              </span>
+              <span className="font-dice text-base text-parchment leading-none mt-0.5">
+                {character.abilities[k]}
+              </span>
+              <span className="font-dice text-[0.65rem] text-gold">{m >= 0 ? `+${m}` : m}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex items-center justify-around px-3.5 pb-2 font-dice text-[0.7rem]">
+        <span className="text-parchment-dim">
+          AC <span className="text-gold">{character.ac}</span>
+        </span>
+        <span className="text-parchment-dim">
+          Speed <span className="text-gold">{character.speed} ft</span>
+        </span>
+        <span className="text-parchment-dim">
+          Prof <span className="text-gold">+{profBonus(lvl)}</span>
+        </span>
+      </div>
+      <div className="px-3.5 pb-2.5 space-y-1">
+        <div className="flex items-center justify-between font-display text-[0.55rem] tracking-[0.2em] uppercase">
+          <span className="text-gold-dim">Level {lvl}</span>
+          <span className="text-parchment-faint">
+            {atMax ? "Max level" : `${character.xp} / ${nextFloor} XP`}
+          </span>
+        </div>
+        <div className="relative h-1.5 bg-ink rounded-sm overflow-hidden border border-gold-dim/20">
+          <div
+            className="absolute inset-y-0 left-0 bg-gold transition-[width] duration-300"
+            style={{ width: `${xpPct}%` }}
+          />
+        </div>
+      </div>
+      {character.spellcasting && hasSlots && (
+        <div className="px-3.5 pb-3 space-y-1.5">
+          <span className="font-display text-[0.55rem] tracking-[0.2em] uppercase text-arcane-soft">
+            Spell Slots
+          </span>
+          {slots.map((slot, i) =>
+            slot.max > 0 ? (
+              <div key={i} className="flex items-center gap-2">
+                <span className="font-dice text-[0.6rem] text-parchment-faint w-5">L{i + 1}</span>
+                <div className="flex gap-1 flex-wrap">
+                  {Array.from({ length: slot.max }).map((_, p) => (
+                    <span
+                      key={p}
+                      title={`${slot.max - slot.used}/${slot.max} remaining`}
+                      className={`w-2.5 h-2.5 rounded-full border ${
+                        p < slot.max - slot.used
+                          ? "bg-arcane border-arcane shadow-[0_0_6px_rgba(139,92,246,0.7)]"
+                          : "bg-transparent border-arcane/40"
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null,
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function InventoryPopout({
   character,
   isMe,
@@ -457,6 +547,7 @@ export function InventoryPopout({
               ✕
             </button>
           </div>
+          <CharacterSheetSummary character={character} />
           <DndContext
             sensors={sensors}
             onDragStart={handleDragStart}
@@ -555,6 +646,16 @@ export function InventoryPopout({
             {cp > 0 && <span className="text-parchment-dim">{cp} cp</span>}
             {ep > 0 && <span className="text-parchment-dim">{ep} ep</span>}
           </div>
+          {character.notes?.trim() && (
+            <div className="border-t border-gold-dim/30 px-3.5 py-2.5 max-h-32 overflow-y-auto">
+              <span className="font-display text-[0.55rem] tracking-[0.2em] uppercase text-gold-dim block mb-1">
+                Backstory
+              </span>
+              <p className="font-narrative italic text-[0.8rem] text-parchment-dim whitespace-pre-wrap leading-relaxed">
+                {character.notes}
+              </p>
+            </div>
+          )}
         </Panel>
       </div>
     </>,

@@ -148,6 +148,7 @@ export const get = query({
       location: campaign.location,
       gmStatus: campaign.gm.status,
       activeCombatId: campaign.activeCombatId ?? null,
+      spotlightCharacterId: campaign.spotlightCharacterId ?? null,
     };
   },
 });
@@ -268,6 +269,33 @@ async function purgeCampaign(ctx: MutationCtx, campaignId: Id<"campaigns">) {
     .withIndex("by_campaign_key", (q) => q.eq("campaignId", campaignId))
     .collect();
   for (const flag of flags) await ctx.db.delete(flag._id);
+  // World codex + ephemeral typing rows
+  for (const doc of await ctx.db
+    .query("factions")
+    .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+    .collect()) {
+    await ctx.db.delete(doc._id);
+  }
+  for (const doc of await ctx.db
+    .query("pois")
+    .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+    .collect()) {
+    await ctx.db.delete(doc._id);
+  }
+  for (const doc of await ctx.db
+    .query("quests")
+    .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+    .collect()) {
+    await ctx.db.delete(doc._id);
+  }
+  for (const doc of await ctx.db
+    .query("typing")
+    .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+    .collect()) {
+    await ctx.db.delete(doc._id);
+  }
+  const campaignDoc = await ctx.db.get(campaignId);
+  if (campaignDoc?.regionMap?.storageId) await ctx.storage.delete(campaignDoc.regionMap.storageId);
   await ctx.db.delete(campaignId);
   await ctx.scheduler.runAfter(0, internal.campaigns.purgeMemories, {
     campaignId: String(campaignId),

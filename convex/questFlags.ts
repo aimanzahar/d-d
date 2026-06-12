@@ -38,6 +38,11 @@ export const set = internalMutation({
         updatedAt: Date.now(),
       });
     }
+    // A real quest/world change is progress — reset the stall-breaker counter.
+    // GM-private secret.* bookkeeping doesn't count.
+    if (!args.key.startsWith("secret.")) {
+      await ctx.db.patch(args.campaignId, { stall: { count: 0 } });
+    }
     return { ok: true };
   },
 });

@@ -41,9 +41,10 @@ export function RollChip({ roll, label }: { roll: RollData; label: string }) {
       >
         {roll.total}
       </span>
-      {roll.success !== undefined && roll.dc !== undefined && (
+      {roll.success !== undefined && (
         <span className={`font-dice text-[0.65rem] uppercase ${roll.success ? "text-vitality" : "text-blood"}`}>
-          {roll.success ? "✓" : "✗"} DC {roll.dc}
+          {roll.success ? "✓" : "✗"}
+          {roll.dc !== undefined ? ` DC ${roll.dc}` : ""}
         </span>
       )}
     </div>

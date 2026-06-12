@@ -80,9 +80,19 @@ export const sendPlayerAction = mutation({
 
     const character = player.characterId ? await ctx.db.get(player.characterId) : null;
 
+    // Incapacitation gate: a downed/dead character cannot take story actions.
+    // Their words become table talk so the GM is never asked to honour them
+    // (and so a dead PC can never narrate their own resurrection).
+    let ooc = args.ooc;
+    if (
+      !ooc &&
+      character?.conditions.some((c) => ["dead", "unconscious", "stable"].includes(c.name))
+    ) {
+      ooc = true;
+    }
+
     // Combat gate: only the active combatant's words are actions; everyone
     // else is table talk (Phase 6 sets mode='combat').
-    let ooc = args.ooc;
     if (campaign.mode === "combat" && !ooc) {
       const combat = campaign.activeCombatId ? await ctx.db.get(campaign.activeCombatId) : null;
       const active = combat?.initiative[combat.activeIndex];
@@ -101,6 +111,31 @@ export const sendPlayerAction = mutation({
     });
 
     if (!ooc) await enqueueGm(ctx, args.campaignId);
+
+    // Soft spotlight: when the spotlighted hero (or anyone, if unset) takes a
+    // story action, pass the beat to the next living party member. A cue only —
+    // it never blocks anyone from acting.
+    if (campaign.mode === "exploration" && !ooc && character) {
+      const holder = campaign.spotlightCharacterId ?? null;
+      if (holder === null || holder === character._id) {
+        const party = await ctx.db
+          .query("characters")
+          .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+          .collect();
+        const living = party
+          .filter(
+            (c) => !c.conditions.some((x) => ["dead", "unconscious", "stable"].includes(x.name)),
+          )
+          .sort((a, b) => a._creationTime - b._creationTime); // stable round-robin
+        if (living.length > 0) {
+          const idx = living.findIndex((c) => c._id === character._id);
+          const next = living[(idx + 1) % living.length];
+          if (next._id !== holder) {
+            await ctx.db.patch(args.campaignId, { spotlightCharacterId: next._id });
+          }
+        }
+      }
+    }
   },
 });
 
@@ -175,5 +210,49 @@ export const markProcessed = internalMutation({
   args: { messageIds: v.array(v.id("messages")) },
   handler: async (ctx, args) => {
     for (const id of args.messageIds) await ctx.db.patch(id, { processed: true });
+  },
+});
+
+const STALL_THRESHOLD = 4; // consecutive quiet exploration GM turns before the world intervenes
+
+// Pacing safety net: counts exploration GM turns with no meaningful progress
+// (a location or quest-flag change resets the counter). At the threshold it
+// injects a one-shot complication directive for the next turn so a dithering
+// scene never grinds in place. Self-guards on mode/status; safe to call on every
+// non-dice-wait turn — it only counts in exploration.
+export const tickStall = internalMutation({
+  args: { campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign || campaign.status !== "active" || campaign.mode !== "exploration") return;
+    // Escape hatch: a table can disable the stall-breaker with a quest flag.
+    const optOut = await ctx.db
+      .query("questFlags")
+      .withIndex("by_campaign_key", (q) =>
+        q.eq("campaignId", args.campaignId).eq("key", "flag.no_stall_breaker"),
+      )
+      .unique();
+    if (optOut?.value === true) return;
+
+    const count = (campaign.stall?.count ?? 0) + 1;
+    if (count < STALL_THRESHOLD) {
+      await ctx.db.patch(args.campaignId, { stall: { count } });
+      return;
+    }
+    // Threshold crossed: fire ONE complication directive, reset so we don't spam.
+    await ctx.db.patch(args.campaignId, { stall: { count: 0, firedAt: Date.now() } });
+    await ctx.db.insert("messages", {
+      campaignId: args.campaignId,
+      kind: "system",
+      content:
+        "PACING DIRECTIVE: the scene is stalling — the party is circling without committing. " +
+        "Introduce an UNEXPECTED COMPLICATION NOW: an NPC acts, a clock runs out, something " +
+        "arrives or erupts. Make the world move, force a fresh decision, and do not re-offer any " +
+        "choice you already gave. One concrete event, grounded in the established fiction.",
+      status: "complete",
+      ooc: true, // GM directive — hidden from players, matches combat directives
+      processed: false, // unprocessed → it's in the GM queue for the chained turn
+    });
+    await enqueueGm(ctx, args.campaignId);
   },
 });

@@ -16,6 +16,12 @@ const SCENE_TYPES = [
   "ship", "mountain", "swamp", "temple", "field", "camp",
 ];
 
+// Normalized 0-1 map coord, or undefined if missing/out of range.
+function clamp01(n: unknown): number | undefined {
+  const x = Number(n);
+  return Number.isFinite(x) && x >= 0 && x <= 1 ? x : undefined;
+}
+
 export const TOOL_DEFS: ToolDef[] = [
   {
     type: "function",
@@ -154,8 +160,80 @@ export const TOOL_DEFS: ToolDef[] = [
           name: { type: "string", description: "e.g. 'The Gilded Flagon'" },
           description: { type: "string", description: "2-3 sentences, present tense" },
           sceneType: { type: "string", enum: SCENE_TYPES },
+          poiSlug: {
+            type: "string",
+            description: "slug of the recorded POI being entered, if any — marks 'you are here' on the region map",
+          },
         },
         required: ["name", "description", "sceneType"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "record_poi",
+      description:
+        "Record or update a point of interest the party has learned about — a town, dungeon, landmark, or danger. Upserts by slug; call again with the same slug to update (e.g. set discovered=true once they arrive). Pass x/y (0-1, 0,0 = top-left of the region map) ONLY if you can place it sensibly relative to other POIs; omit them and it stays an unplaced journal entry.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "snake_case stable id, e.g. 'ravenhollow'" },
+          name: { type: "string" },
+          kind: {
+            type: "string",
+            enum: ["settlement", "dungeon", "landmark", "wilds", "danger", "quest_site"],
+          },
+          description: { type: "string", description: "1-3 sentences, player-facing" },
+          factionSlug: { type: "string", description: "controlling faction's slug, optional" },
+          x: { type: "number", description: "0-1 horizontal map position, optional" },
+          y: { type: "number", description: "0-1 vertical map position, optional" },
+          discovered: { type: "boolean", description: "true once visited; default false (rumored)" },
+        },
+        required: ["slug", "name", "kind", "description"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "record_faction",
+      description:
+        "Record or update a faction, guild, cult, house, or organized power the party has learned about. Upserts by slug. Update standing as the party's reputation shifts.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string" },
+          name: { type: "string" },
+          description: { type: "string", description: "1-3 sentences, player-facing" },
+          standing: {
+            type: "string",
+            enum: ["allied", "friendly", "neutral", "unfriendly", "hostile", "unknown"],
+          },
+          symbol: { type: "string", description: "a sigil glyph or single emoji, optional" },
+          discovered: { type: "boolean" },
+        },
+        required: ["slug", "name", "description", "standing"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "record_quest",
+      description:
+        "Record or update a quest in the party's journal. Upserts by slug. This ALSO keeps the matching quest.<slug>.status flag in sync — do NOT also call set_quest_flag for the same quest.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "snake_case; reused as the quest.<slug>.status flag" },
+          title: { type: "string" },
+          description: { type: "string", description: "current objective, player-facing" },
+          status: { type: "string", enum: ["active", "completed", "failed"] },
+          factionSlug: { type: "string" },
+          poiSlug: { type: "string", description: "POI this quest points to, optional" },
+        },
+        required: ["slug", "title", "description", "status"],
       },
     },
   },
@@ -351,6 +429,7 @@ export const toolChangeLocation = internalMutation({
     name: v.string(),
     description: v.string(),
     sceneType: v.string(),
+    poiSlug: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     if (!SCENE_TYPES.includes(args.sceneType)) {
@@ -362,7 +441,21 @@ export const toolChangeLocation = internalMutation({
         description: args.description.slice(0, 600),
         sceneType: args.sceneType as any,
       },
+      // Moving the party is meaningful progress — reset the stall-breaker.
+      stall: { count: 0 },
     });
+    // "You are here": clear all markers, then light the entered POI — matched by
+    // the linked slug, else by name (best-effort when the GM didn't pass a slug).
+    const pois = await ctx.db
+      .query("pois")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .collect();
+    const lowerName = args.name.trim().toLowerCase();
+    for (const p of pois) {
+      const isHere =
+        (args.poiSlug ? p.slug === args.poiSlug : false) || p.name.trim().toLowerCase() === lowerName;
+      if (p.isCurrent !== isHere) await ctx.db.patch(p._id, { isCurrent: isHere });
+    }
     return { ok: true, location: args.name };
   },
 });
@@ -530,7 +623,52 @@ export async function dispatchTool(
         name: String(args.name ?? "Somewhere"),
         description: String(args.description ?? ""),
         sceneType: String(args.sceneType ?? "field"),
+        poiSlug: typeof args.poiSlug === "string" ? args.poiSlug : undefined,
       });
+
+    case "record_poi": {
+      const slug = String(args.slug ?? "");
+      if (!/^[a-z0-9_]+$/.test(slug)) return { ok: false, error: "slug must be snake_case (a-z0-9_)" };
+      return await ctx.runMutation(internal.codex.upsertPoi, {
+        campaignId,
+        slug,
+        name: String(args.name ?? "").slice(0, 80),
+        kind: String(args.kind ?? "landmark"),
+        description: String(args.description ?? "").slice(0, 600),
+        factionSlug: typeof args.factionSlug === "string" ? args.factionSlug : undefined,
+        x: clamp01(args.x),
+        y: clamp01(args.y),
+        discovered: args.discovered === true,
+      });
+    }
+
+    case "record_faction": {
+      const slug = String(args.slug ?? "");
+      if (!/^[a-z0-9_]+$/.test(slug)) return { ok: false, error: "slug must be snake_case (a-z0-9_)" };
+      return await ctx.runMutation(internal.codex.upsertFaction, {
+        campaignId,
+        slug,
+        name: String(args.name ?? "").slice(0, 80),
+        description: String(args.description ?? "").slice(0, 600),
+        standing: String(args.standing ?? "unknown"),
+        symbol: typeof args.symbol === "string" ? args.symbol.slice(0, 8) : undefined,
+        discovered: args.discovered !== false,
+      });
+    }
+
+    case "record_quest": {
+      const slug = String(args.slug ?? "");
+      if (!/^[a-z0-9_]+$/.test(slug)) return { ok: false, error: "slug must be snake_case (a-z0-9_)" };
+      return await ctx.runMutation(internal.codex.upsertQuest, {
+        campaignId,
+        slug,
+        title: String(args.title ?? "").slice(0, 100),
+        description: String(args.description ?? "").slice(0, 600),
+        status: String(args.status ?? "active"),
+        factionSlug: typeof args.factionSlug === "string" ? args.factionSlug : undefined,
+        poiSlug: typeof args.poiSlug === "string" ? args.poiSlug : undefined,
+      });
+    }
 
     case "apply_rest": {
       const party = await ctx.runQuery(internal.gm.tools.partyCharacterIds, { campaignId });

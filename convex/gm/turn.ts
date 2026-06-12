@@ -237,6 +237,12 @@ export const respond = internalAction({
         await ctx.runMutation(internal.combat.autoAdvanceIfMonsterStuck, {
           campaignId: args.campaignId,
         });
+        // Pacing safety net: count quiet exploration turns; the mutation self-
+        // guards on mode/progress and fires a one-shot complication directive at
+        // the threshold so a dithering scene never grinds in place.
+        await ctx.runMutation(internal.messages.tickStall, {
+          campaignId: args.campaignId,
+        });
       }
 
       // Fire-and-forget memorization — never extends or blocks the turn

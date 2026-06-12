@@ -69,7 +69,95 @@ export default defineSchema({
       generation: v.number(), // monotonic; stale scheduled actions no-op
     }),
     activeCombatId: v.optional(v.id("combats")),
+    // Stall-breaker: GM turns at the current scene since the last meaningful
+    // progress (location or quest-flag change). Reset to 0 on progress; when it
+    // crosses the threshold the engine injects a one-shot complication directive.
+    stall: v.optional(v.object({ count: v.number(), firedAt: v.optional(v.number()) })),
+    // Soft-spotlight (exploration only): whose turn it is to act. A gentle cue,
+    // never enforced. undefined = anyone may act.
+    spotlightCharacterId: v.optional(v.id("characters")),
+    // AI-generated region map backdrop. Markers (POIs) overlay it via the pois
+    // table's normalized x/y — the image itself carries no labels.
+    regionMap: v.optional(
+      v.object({
+        status: v.union(v.literal("generating"), v.literal("done"), v.literal("failed")),
+        storageId: v.optional(v.id("_storage")),
+        prompt: v.optional(v.string()),
+        generatedAt: v.optional(v.number()),
+      }),
+    ),
   }).index("by_inviteCode", ["inviteCode"]),
+
+  // Ephemeral "is typing" presence. One row per player; typingUntil is a TTL —
+  // expired rows are ignored by `list` and may be GC'd lazily.
+  typing: defineTable({
+    campaignId: v.id("campaigns"),
+    playerId: v.id("players"),
+    characterName: v.string(),
+    typingUntil: v.number(),
+  })
+    .index("by_campaign", ["campaignId"])
+    .index("by_player", ["playerId"]),
+
+  // --- World Codex: the party's player-facing journal, written by GM tools ---
+
+  factions: defineTable({
+    campaignId: v.id("campaigns"),
+    slug: v.string(), // stable snake_case id used by tools + POI refs
+    name: v.string(),
+    description: v.string(),
+    standing: v.union(
+      v.literal("allied"),
+      v.literal("friendly"),
+      v.literal("neutral"),
+      v.literal("unfriendly"),
+      v.literal("hostile"),
+      v.literal("unknown"),
+    ),
+    symbol: v.optional(v.string()),
+    discovered: v.boolean(),
+    updatedAt: v.number(),
+  })
+    .index("by_campaign", ["campaignId"])
+    .index("by_campaign_slug", ["campaignId", "slug"]),
+
+  // Points of interest = clickable region-map markers + journal entries.
+  pois: defineTable({
+    campaignId: v.id("campaigns"),
+    slug: v.string(),
+    name: v.string(),
+    kind: v.union(
+      v.literal("settlement"),
+      v.literal("dungeon"),
+      v.literal("landmark"),
+      v.literal("wilds"),
+      v.literal("danger"),
+      v.literal("quest_site"),
+    ),
+    description: v.string(),
+    factionSlug: v.optional(v.string()),
+    // Normalized map coords (0-1). Absent = recorded but not placed on the map.
+    x: v.optional(v.number()),
+    y: v.optional(v.number()),
+    discovered: v.boolean(), // visited vs merely heard-of
+    isCurrent: v.boolean(), // "you are here"
+    updatedAt: v.number(),
+  })
+    .index("by_campaign", ["campaignId"])
+    .index("by_campaign_slug", ["campaignId", "slug"]),
+
+  quests: defineTable({
+    campaignId: v.id("campaigns"),
+    slug: v.string(), // == the slug in quest.<slug>.status flag
+    title: v.string(),
+    description: v.string(),
+    status: v.union(v.literal("active"), v.literal("completed"), v.literal("failed")),
+    factionSlug: v.optional(v.string()),
+    poiSlug: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_campaign", ["campaignId"])
+    .index("by_campaign_slug", ["campaignId", "slug"]),
 
   players: defineTable({
     campaignId: v.id("campaigns"),

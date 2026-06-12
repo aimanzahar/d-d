@@ -52,6 +52,45 @@ export const getContext = internalQuery({
       .withIndex("by_campaign_key", (q) => q.eq("campaignId", args.campaignId))
       .collect();
 
+    // World codex (factions / POIs / active quests) — surfaced so the GM reuses
+    // existing slugs instead of forking duplicates.
+    const [factions, pois, quests] = await Promise.all([
+      ctx.db
+        .query("factions")
+        .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+        .collect(),
+      ctx.db
+        .query("pois")
+        .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+        .collect(),
+      ctx.db
+        .query("quests")
+        .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+        .collect(),
+    ]);
+    const knownWorldLines: string[] = [];
+    if (factions.length) {
+      knownWorldLines.push(
+        `Factions: ${factions.map((f) => `${f.slug} (${f.name}) — ${f.standing}`).join("; ")}`,
+      );
+    }
+    if (pois.length) {
+      knownWorldLines.push(
+        `POIs: ${pois
+          .map(
+            (p) =>
+              `${p.slug} (${p.name}, ${p.kind})${p.discovered ? "" : " [rumored]"}${p.isCurrent ? " [HERE]" : ""}`,
+          )
+          .join("; ")}`,
+      );
+    }
+    const activeQuests = quests.filter((q) => q.status === "active");
+    if (activeQuests.length) {
+      knownWorldLines.push(
+        `Active quests: ${activeQuests.map((q) => `${q.slug} (${q.title})`).join("; ")}`,
+      );
+    }
+
     // Combat block: initiative + economy + ASCII battle map for spatial grounding
     let combatBlock = "";
     if (campaign.mode === "combat" && campaign.activeCombatId) {
@@ -149,6 +188,9 @@ export const getContext = internalQuery({
       combatBlock,
       flags.length
         ? `\n# QUEST FLAGS\n${flags.map((f) => `${f.key} = ${JSON.stringify(f.value)}`).join("\n")}`
+        : "",
+      knownWorldLines.length
+        ? `\n# KNOWN WORLD (reuse these exact slugs; do not fork new ones)\n${knownWorldLines.join("\n")}`
         : "",
       history.length ? `\n# RECENT TRANSCRIPT\n${history.join("\n")}` : "",
       `\n# NEW PLAYER ACTIONS (respond to these)\n${newActions.join("\n") || "(none — continue the scene)"}`,

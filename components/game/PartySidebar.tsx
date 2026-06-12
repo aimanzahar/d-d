@@ -8,6 +8,7 @@ import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useSession } from "@/hooks/useSession";
 import { Panel } from "@/components/ui/Panel";
 import { InventoryPopout } from "@/components/game/InventoryPopout";
+import { WorldTools } from "@/components/game/WorldTools";
 
 function HpBar({ current, max, temp }: { current: number; max: number; temp: number }) {
   const ghostRef = useRef<HTMLDivElement>(null);
@@ -50,11 +51,13 @@ function HpBar({ current, max, temp }: { current: number; max: number; temp: num
 function MemberCard({
   character,
   isMe,
+  spotlighted,
   open,
   onToggle,
 }: {
   character: Doc<"characters">;
   isMe: boolean;
+  spotlighted: boolean;
   open: boolean;
   onToggle: (top: number) => void;
 }) {
@@ -66,6 +69,10 @@ function MemberCard({
     <Panel
       className={`cursor-pointer hover:shadow-[0_0_18px_rgba(201,164,92,0.15)] transition-shadow ${
         dead ? "grayscale opacity-60" : ""
+      } ${
+        spotlighted && !dead
+          ? "ring-1 ring-gold shadow-[0_0_22px_rgba(201,164,92,0.30)] animate-ember-pulse"
+          : ""
       }`}
       innerClassName="px-3.5 py-3 space-y-1.5"
       role="button"
@@ -83,6 +90,11 @@ function MemberCard({
     >
       <div className="flex items-baseline justify-between gap-2">
         <span className="font-display text-[0.8rem] tracking-wide text-parchment truncate">
+          {spotlighted && !dead && (
+            <span className="text-gold mr-1" title="Spotlight — their moment to act">
+              ✦
+            </span>
+          )}
           {character.name}
           {isMe && <span className="ml-1.5 text-[0.55rem] text-parchment-faint uppercase">you</span>}
         </span>
@@ -140,6 +152,10 @@ export function PartySidebar() {
     sessionToken: session.sessionToken,
     campaignId: session.campaignId,
   });
+  const campaign = useQuery(api.campaigns.get, {
+    sessionToken: session.sessionToken,
+    inviteCode: session.inviteCode,
+  });
   const [popout, setPopout] = useState<{ id: Id<"characters">; top: number } | null>(null);
   // Re-derive from the live party each render so GM inventory edits appear immediately
   // (and the popout unmounts if the character vanishes).
@@ -147,6 +163,7 @@ export function PartySidebar() {
   return (
     <>
       <aside className="w-[260px] shrink-0 overflow-y-auto p-3 space-y-3 hidden md:block">
+        <WorldTools />
         <p className="font-display text-[0.6rem] tracking-[0.35em] uppercase text-gold-dim px-1">
           The Party
         </p>
@@ -155,6 +172,7 @@ export function PartySidebar() {
             key={c._id}
             character={c}
             isMe={c._id === session.characterId}
+            spotlighted={campaign?.spotlightCharacterId === c._id}
             open={popout?.id === c._id}
             onToggle={(top) =>
               setPopout((p) => (p?.id === c._id ? null : { id: c._id, top }))

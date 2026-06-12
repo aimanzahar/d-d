@@ -156,6 +156,17 @@ async function damageEntity(
   return { hpAfter, status: isDead ? "dead" : "ok" };
 }
 
+// Qualitative wound band from a post-damage HP ratio. Flavor only — never a
+// number. Used to colour public roll lines so exact HP never reaches the feed.
+function woundBand(hpAfter: number, maxHp: number): string {
+  if (hpAfter <= 0) return "down";
+  const r = hpAfter / Math.max(1, maxHp);
+  if (r >= 0.75) return "barely scratched";
+  if (r >= 0.5) return "bloodied";
+  if (r >= 0.25) return "badly wounded";
+  return "reeling, near collapse";
+}
+
 // Advances initiative: skips dead entries, ticks conditions, resets economy.
 // Returns the new active entry plus whether the GM must act (monster turn)
 // and any auto-created death save.
@@ -262,7 +273,13 @@ async function endCombatCore(
   outcome: string,
 ) {
   await ctx.db.patch(combat._id, { status: "ended", outcome });
-  await ctx.db.patch(campaignId, { mode: "exploration", activeCombatId: undefined });
+  // Clear the spotlight so a stale (possibly dead) holder doesn't carry over;
+  // the first exploration action reseeds it.
+  await ctx.db.patch(campaignId, {
+    mode: "exploration",
+    activeCombatId: undefined,
+    spotlightCharacterId: undefined,
+  });
   const characters = await ctx.db
     .query("characters")
     .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
@@ -504,10 +521,9 @@ export const attack = mutation({
       purpose: "attack",
       context: `${weaponLabel} vs ${target.label}`,
       outcome: attackRoll,
-      dc: target.ac,
       success: hit,
       crit: attackRoll.d20 === 20 ? "hit" : fumble ? "miss" : undefined,
-      message: `${character.name} attacks ${target.label} with ${weaponLabel}: ${attackRoll.total} vs AC — ${hit ? (crit ? "CRITICAL HIT!" : "hit!") : "miss."}`,
+      message: `${character.name} attacks ${target.label} with ${weaponLabel}: ${attackRoll.total} — ${hit ? (crit ? "CRITICAL HIT!" : "hit!") : "miss."}`,
       processed: false, // GM narrates the accumulated round on its next wake
     });
 
@@ -525,7 +541,7 @@ export const attack = mutation({
         purpose: "damage",
         context: `${weaponLabel} damage`,
         outcome: { ...dmg, total: damageTotal, modifier: mod },
-        message: `${damageTotal} ${data?.damage?.damage_type?.name?.toLowerCase() ?? ""} damage to ${target.label}${result.status === "dead" ? ` — ${target.label} falls!` : ` (${result.hpAfter}/${target.maxHp} HP)`}`,
+        message: `${damageTotal} ${data?.damage?.damage_type?.name?.toLowerCase() ?? ""} damage to ${target.label}${result.status === "dead" ? ` — ${target.label} falls!` : ` — ${target.label} is ${woundBand(result.hpAfter, target.maxHp)}.`}`,
         processed: false,
       });
       if (result.status === "dead") {
@@ -685,7 +701,6 @@ export const castSpell = mutation({
             purpose: "attack",
             context: `${spell.name} vs ${target.label}`,
             outcome: atk,
-            dc: target.ac,
             success: hit,
             crit: atk.d20 === 20 ? "hit" : atk.d20 === 1 ? "miss" : undefined,
             message: `${character.name} casts ${spell.name} at ${target.label}: ${hit ? `hit — ${damage} ${damageType} damage` : "miss"}.`,
@@ -1155,10 +1170,9 @@ export const toolNpcAttack = internalMutation({
       purpose: "attack",
       context: `${attack.name} vs ${target.name}`,
       outcome: atk,
-      dc: target.ac,
       success: hit,
       crit: atk.d20 === 20 ? "hit" : fumble ? "miss" : undefined,
-      message: `${attacker.label} attacks ${target.name} with ${attack.name}: ${atk.total} vs AC ${target.ac} — ${hit ? (crit ? "CRITICAL HIT!" : "hit!") : "miss."}`,
+      message: `${attacker.label} attacks ${target.name} with ${attack.name}: ${atk.total} — ${hit ? (crit ? "CRITICAL HIT!" : "hit!") : "miss."}`,
       processed: true,
     });
 
@@ -1176,7 +1190,7 @@ export const toolNpcAttack = internalMutation({
       context: `${attack.name} damage`,
       outcome: { ...dmg, total: damage },
       message: `${damage} ${attack.damageType.toLowerCase()} damage to ${target.name}${
-        result.status === "down" ? ` — ${target.name} DROPS, unconscious and dying!` : result.status === "dead" ? ` — ${target.name} is KILLED outright!` : ` (${result.hpAfter}/${target.maxHp} HP)`
+        result.status === "down" ? ` — ${target.name} DROPS, unconscious and dying!` : result.status === "dead" ? ` — ${target.name} is KILLED outright!` : ` — ${target.name} is ${woundBand(result.hpAfter, target.maxHp)}.`
       }`,
       processed: true,
     });

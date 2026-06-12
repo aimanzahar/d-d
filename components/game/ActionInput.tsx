@@ -5,18 +5,47 @@ import { ConvexError } from "convex/values";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { useSession } from "@/hooks/useSession";
+import { useTyping } from "@/hooks/useTyping";
 import { Button } from "@/components/ui/Button";
 import { useComposerStore } from "@/stores/composerStore";
+
+const DOWN_CONDITIONS = ["dead", "unconscious", "stable"];
 
 export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
   const session = useSession();
   const send = useMutation(api.messages.sendPlayerAction);
   const requestImage = useMutation(api.images.requestSceneImage);
+  const { onKeystroke, stopTyping, typers } = useTyping();
   const [text, setText] = useState("");
   const [ooc, setOoc] = useState(false);
   const [busy, setBusy] = useState(false);
   const [imageNote, setImageNote] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Live state that decides whether the player may take an ACTION right now.
+  const combat = useQuery(api.combat.get, {
+    sessionToken: session.sessionToken,
+    campaignId: session.campaignId,
+  });
+  const me = useQuery(api.characters.getMine, { sessionToken: session.sessionToken });
+  const campaign = useQuery(api.campaigns.get, {
+    sessionToken: session.sessionToken,
+    inviteCode: session.inviteCode,
+  });
+
+  const incapacitated = !!me?.conditions.some((c) => DOWN_CONDITIONS.includes(c.name));
+  const inCombat = campaign?.mode === "combat";
+  const active = combat?.initiative[combat.activeIndex];
+  const notMyTurn = inCombat && !!combat && active?.refId !== String(session.characterId);
+  // When down or off-turn, the composer is locked to table talk (the server
+  // coerces it too — this just makes the UI honest about it).
+  const forcedOoc = incapacitated || notMyTurn;
+  const effectiveOoc = forcedOoc || ooc;
+
+  // Soft spotlight (exploration only) — a cue, never a block.
+  const spotlight = campaign?.spotlightCharacterId ?? null;
+  const mySpotlight = spotlight === session.characterId;
+  const showSpotlightHint = campaign?.mode === "exploration" && !effectiveOoc && !incapacitated;
 
   // Seed from the composer store (inventory clicks): replace when empty, append when typed.
   useEffect(
@@ -74,9 +103,10 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
         sessionToken: session.sessionToken,
         campaignId: session.campaignId,
         content,
-        ooc,
+        ooc: effectiveOoc,
       });
       setText("");
+      stopTyping();
     } finally {
       setBusy(false);
     }
@@ -89,6 +119,15 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
           The Game Master is weaving the tale…
         </p>
       )}
+      {typers.length > 0 && (
+        <p className="font-narrative italic text-xs text-arcane-soft mb-2 animate-flicker">
+          {typers.length === 1
+            ? `${typers[0]} is typing…`
+            : typers.length === 2
+              ? `${typers[0]} and ${typers[1]} are typing…`
+              : `${typers.length} heroes are typing…`}
+        </p>
+      )}
       {forming && (
         <p className="font-narrative italic text-xs text-arcane-soft mb-2 animate-flicker">
           The vision is forming…
@@ -97,19 +136,39 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
       {!forming && imageNote && (
         <p className="font-narrative italic text-xs text-arcane-soft mb-2">{imageNote}</p>
       )}
+      {forcedOoc && (
+        <p className="font-narrative italic text-xs text-blood/90 mb-2">
+          {incapacitated
+            ? "Your hero has fallen — you can only speak to the table."
+            : "It's not your turn — only table talk reaches the others now."}
+        </p>
+      )}
+      {showSpotlightHint && (
+        <p className="font-narrative italic text-xs text-gold-dim mb-2">
+          {spotlight == null
+            ? "Anyone can act."
+            : mySpotlight
+              ? "✦ It's your turn to act."
+              : "Another hero is in the spotlight — you can still act."}
+        </p>
+      )}
       <div className="flex gap-3 items-end">
         <textarea
           ref={textareaRef}
           className="field-arcane flex-1 px-3.5 py-2.5 text-[0.95rem] resize-none leading-snug"
           rows={2}
           placeholder={
-            ooc
+            effectiveOoc
               ? "Say something to the table (the GM won't react)…"
               : "What do you do? (e.g. I check the cart for tracks…)"
           }
           value={text}
           maxLength={2000}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            onKeystroke();
+          }}
+          onBlur={stopTyping}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -120,15 +179,22 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
         <div className="flex flex-col gap-1.5">
           <div className="flex gap-1.5">
             <button
-              className={`font-display text-[0.55rem] tracking-[0.2em] uppercase px-2 py-1 border cursor-pointer ${
-                ooc
+              disabled={forcedOoc}
+              className={`font-display text-[0.55rem] tracking-[0.2em] uppercase px-2 py-1 border ${
+                effectiveOoc
                   ? "border-arcane text-arcane-soft"
                   : "border-gold-dim/40 text-parchment-faint hover:border-gold-dim"
-              }`}
-              onClick={() => setOoc(!ooc)}
-              title="Table talk doesn't trigger the GM"
+              } ${forcedOoc ? "opacity-60 cursor-default" : "cursor-pointer"}`}
+              onClick={() => !forcedOoc && setOoc(!ooc)}
+              title={
+                forcedOoc
+                  ? incapacitated
+                    ? "Your hero is down — table talk only"
+                    : "Wait for your turn — table talk only"
+                  : "Table talk doesn't trigger the GM"
+              }
             >
-              {ooc ? "table talk" : "action"}
+              {effectiveOoc ? "table talk" : "action"}
             </button>
             <button
               className="font-display text-[0.55rem] tracking-[0.2em] uppercase px-2 py-1 border border-arcane/40 text-arcane-soft hover:border-arcane cursor-pointer"

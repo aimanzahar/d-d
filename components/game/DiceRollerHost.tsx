@@ -72,15 +72,20 @@ export function DiceRollerHost() {
     // Keyed by rollId so back-to-back events remount with fresh opacity.
     <div ref={wrapRef} key={current.rollId}>
       <DiceOverlay event={current} hurry={hurry} onSettled={handleSettled} onDone={handleDone} />
-      <div className="fixed bottom-24 inset-x-0 z-50 pointer-events-none flex justify-center">
-        <div className="flex flex-col items-center gap-1 rounded border border-gold/30 bg-ink/85 px-8 py-4 backdrop-blur-sm">
-          <p className="font-display text-xs uppercase tracking-[0.2em] text-gold">
-            {current.actorName} — {current.purpose}
+      <div className="fixed inset-x-0 top-[18%] z-50 pointer-events-none flex justify-center px-4">
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-gold/40 bg-ink/90 px-12 py-8 backdrop-blur-md shadow-[0_0_60px_rgba(201,164,92,0.25)] max-w-[90vw]">
+          <p className="font-display text-[0.7rem] sm:text-sm uppercase tracking-[0.35em] text-gold-dim">
+            rolling
+          </p>
+          <p className="font-display text-2xl sm:text-3xl tracking-[0.12em] text-gold text-center leading-tight">
+            {current.actorName}
+            <span className="text-parchment-dim"> — </span>
+            <span className="capitalize">{current.purpose}</span>
           </p>
           {revealed && (
             <div
               ref={totalRef}
-              className={`font-dice text-4xl ${totalColor}`}
+              className={`font-dice text-7xl sm:text-8xl leading-none ${totalColor}`}
               style={{ transform: "scale(0)", ...totalGlow }}
             >
               {current.total}

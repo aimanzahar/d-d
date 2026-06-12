@@ -12,6 +12,7 @@ import type * as accounts from "../accounts.js";
 import type * as campaigns from "../campaigns.js";
 import type * as characterOps from "../characterOps.js";
 import type * as characters from "../characters.js";
+import type * as codex from "../codex.js";
 import type * as combat from "../combat.js";
 import type * as crons from "../crons.js";
 import type * as dice from "../dice.js";
@@ -35,11 +36,13 @@ import type * as messages from "../messages.js";
 import type * as players from "../players.js";
 import type * as presence from "../presence.js";
 import type * as questFlags from "../questFlags.js";
+import type * as regionMap from "../regionMap.js";
 import type * as seed from "../seed.js";
 import type * as smoke from "../smoke.js";
 import type * as srd_choice from "../srd/choice.js";
 import type * as srd_static from "../srd/static.js";
 import type * as srdData from "../srdData.js";
+import type * as typing from "../typing.js";
 
 import type {
   ApiFromModules,
@@ -52,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   campaigns: typeof campaigns;
   characterOps: typeof characterOps;
   characters: typeof characters;
+  codex: typeof codex;
   combat: typeof combat;
   crons: typeof crons;
   dice: typeof dice;
@@ -75,11 +79,13 @@ declare const fullApi: ApiFromModules<{
   players: typeof players;
   presence: typeof presence;
   questFlags: typeof questFlags;
+  regionMap: typeof regionMap;
   seed: typeof seed;
   smoke: typeof smoke;
   "srd/choice": typeof srd_choice;
   "srd/static": typeof srd_static;
   srdData: typeof srdData;
+  typing: typeof typing;
 }>;
 
 /**
