@@ -22,7 +22,7 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
       await requestImage({ sessionToken: session.sessionToken, campaignId: session.campaignId });
       setImageNote("The vision is forming…");
     } catch (e) {
-      const code = e instanceof ConvexError ? (e.data as any)?.code : null;
+      const code = e instanceof ConvexError ? (e.data as { code?: string })?.code : null;
       setImageNote(
         code === "image_cooldown"
           ? "The scrying pool needs a moment — try again shortly."

@@ -73,7 +73,10 @@ export function CombatHUD() {
     try {
       return await fn();
     } catch (e) {
-      const data = e instanceof ConvexError ? (e.data as any) : null;
+      const data =
+        e instanceof ConvexError
+          ? (e.data as { code?: string; active?: string; distance?: number; range?: number })
+          : null;
       setError(
         data?.code === "not_your_turn"
           ? `It's ${data.active}'s turn.`

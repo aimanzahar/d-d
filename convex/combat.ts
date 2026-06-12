@@ -454,7 +454,7 @@ export const attack = mutation({
       const data = doc?.data as any;
       if (data?.damage) weapons.push({ item, data });
     }
-    let weapon = args.weaponName
+    const weapon = args.weaponName
       ? weapons.find((w) => w.item.name.toLowerCase().includes(args.weaponName!.toLowerCase()))
       : (weapons.find((w) => w.item.equipped) ?? weapons[0]);
     const data = weapon?.data;

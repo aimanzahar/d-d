@@ -28,7 +28,11 @@ export function ConvexBridge() {
     campaignId: session.campaignId,
   });
 
-  const mountedAt = useRef(Date.now());
+  // Stamped in an effect (not the ref initializer) so render stays pure.
+  const mountedAt = useRef<number | null>(null);
+  useEffect(() => {
+    mountedAt.current ??= Date.now();
+  }, []);
 
   useEffect(() => {
     if (!campaign) return;
@@ -86,7 +90,8 @@ export function ConvexBridge() {
   useEffect(() => {
     if (!rolls) return;
     // Animate only rolls that landed after this client mounted (no replays)
-    const fresh = rolls.filter((r) => r.at > mountedAt.current - 4000);
+    const mounted = mountedAt.current ?? Date.now();
+    const fresh = rolls.filter((r) => r.at > mounted - 4000);
     if (fresh.length > 0) {
       useGameStore.getState().enqueueDice(
         fresh

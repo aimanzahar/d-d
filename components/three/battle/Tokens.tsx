@@ -4,7 +4,7 @@
 // label, invisible click hitbox. Tokens glide between cells with maath
 // damping; the active token's ring pulses and casts a soft point light.
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { useFrame } from "@react-three/fiber";
 import type { ThreeEvent } from "@react-three/fiber";
@@ -79,9 +79,10 @@ function Token({
   height: number;
 }) {
   const groupRef = useRef<THREE.Group>(null);
+  const ringRef = useRef<THREE.Mesh>(null);
   const target = useRef(new THREE.Vector3());
   // Capture spawn cell once so re-renders never snap the gliding group back.
-  const spawn = useRef({ x: token.x, y: token.y });
+  const [spawn] = useState(() => ({ x: token.x, y: token.y }));
 
   // Ring material is per-token (NOT module-cached) because the active pulse
   // mutates emissiveIntensity — sharing it would pulse every token's ring.
@@ -96,18 +97,18 @@ function Token({
     [ringColor],
   );
   useEffect(() => () => ringMaterial.dispose(), [ringMaterial]);
-  useEffect(() => {
-    if (!token.active) ringMaterial.emissiveIntensity = RING_BASE_INTENSITY;
-  }, [token.active, ringMaterial]);
 
   useFrame((state, delta) => {
     const group = groupRef.current;
     if (!group) return;
     target.current.set(token.x - width / 2 + 0.5, 0, token.y - height / 2 + 0.5);
     damp3(group.position, target.current, 0.18, delta);
-    if (token.active) {
-      ringMaterial.emissiveIntensity =
-        RING_BASE_INTENSITY + 0.5 * Math.abs(Math.sin(state.clock.elapsedTime * 3));
+    // Pulse (or rest) the ring through the mesh ref so render values stay frozen.
+    const ring = ringRef.current?.material as THREE.MeshStandardMaterial | undefined;
+    if (ring) {
+      ring.emissiveIntensity = token.active
+        ? RING_BASE_INTENSITY + 0.5 * Math.abs(Math.sin(state.clock.elapsedTime * 3))
+        : RING_BASE_INTENSITY;
     }
   });
 
@@ -138,9 +139,9 @@ function Token({
     <group
       ref={groupRef}
       position={[
-        spawn.current.x - width / 2 + 0.5,
+        spawn.x - width / 2 + 0.5,
         0,
-        spawn.current.y - height / 2 + 0.5,
+        spawn.y - height / 2 + 0.5,
       ]}
     >
       <mesh
@@ -150,6 +151,7 @@ function Token({
         castShadow
       />
       <mesh
+        ref={ringRef}
         geometry={ringGeometry}
         material={ringMaterial}
         rotation-x={-Math.PI / 2}

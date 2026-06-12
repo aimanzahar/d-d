@@ -141,11 +141,15 @@ export function ParticleField({
   useEffect(() => () => geometry.dispose(), [geometry]);
   useEffect(() => () => material.dispose(), [material]);
 
+  // Drive the time uniform through the scene-graph ref so render values stay frozen.
+  const pointsRef = useRef<THREE.Points>(null);
   useFrame((state) => {
-    material.uniforms.uTime.value = state.clock.elapsedTime;
+    const points = pointsRef.current;
+    if (!points) return;
+    (points.material as THREE.ShaderMaterial).uniforms.uTime.value = state.clock.elapsedTime;
   });
 
-  return <points geometry={geometry} material={material} frustumCulled={false} />;
+  return <points ref={pointsRef} geometry={geometry} material={material} frustumCulled={false} />;
 }
 
 /* ------------------------------------------------------------------ */
@@ -161,8 +165,8 @@ export type FlickerLightProps = {
 
 export function FlickerLight({ color, intensity, position, distance = 14 }: FlickerLightProps) {
   const ref = useRef<THREE.PointLight>(null);
-  // Per-instance phase so multiple torches never flicker in lockstep.
-  const phase = useMemo(() => Math.random() * 17, []);
+  // Per-instance phase (hashed from position) so multiple torches never flicker in lockstep.
+  const phase = position[0] * 7.31 + position[1] * 3.79 + position[2] * 13.17;
 
   useFrame((state) => {
     const light = ref.current;

@@ -5,7 +5,7 @@
 // ~38%, tightens fog, and pushes silhouettes out past radius ~13 so the battle
 // map (18x14 max, centered at origin) is never crowded.
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { FlickerLight, Ground, ParticleField, SILHOUETTE } from "./kit";
@@ -40,6 +40,16 @@ const PILLAR = new THREE.CylinderGeometry(0.5, 0.55, 5, 10);
 const SKY_SPHERE = new THREE.SphereGeometry(60, 24, 16);
 
 const HEARTH_MAT = new THREE.MeshBasicMaterial({ color: "#ff8c3b", side: THREE.DoubleSide });
+
+// Lit (standard) materials so tavern structure picks up warm firelight instead
+// of rendering as flat black slabs from the elevated orbit camera.
+const WOOD_MAT = new THREE.MeshStandardMaterial({ color: "#4a3520", roughness: 0.95, metalness: 0 });
+const STONE_MAT = new THREE.MeshStandardMaterial({ color: "#2e2118", roughness: 1, metalness: 0 });
+const TAVERN_WINDOW_MAT = new THREE.MeshStandardMaterial({
+  color: "#000000",
+  emissive: "#ffb066",
+  emissiveIntensity: 0.9,
+});
 
 const GODRAY_MAT = new THREE.MeshBasicMaterial({
   color: "#b9d2e8",
@@ -79,7 +89,7 @@ const SKY_MAT = new THREE.ShaderMaterial({
 /* TavernScene                                                         */
 /* ------------------------------------------------------------------ */
 
-const RAFTER_Z = [-6, -2.5, 1.5, 5.5];
+const POST_X = [-9, -3, 3, 9];
 const BARREL_OFFSETS: Vec3Tuple[] = [
   [0, 0.55, 0],
   [1.05, 0.55, 0.35],
@@ -102,15 +112,15 @@ export function TavernScene({ dimmed = false }: AmbientSceneProps) {
       <color attach="background" args={["#1a120b"]} />
       <ambientLight color="#2a1c10" intensity={0.25 * lk} />
 
-      {/* Hearth: glowing ember plane + flickering firelight. */}
+      {/* Hearth: stone fireplace surround framing a glowing ember plane + flickering firelight. */}
       <group position={hearthPos}>
-        <mesh
-          geometry={PLANE}
-          material={HEARTH_MAT}
-          position={[0, 0.8, 0]}
-          rotation-y={Math.PI * 0.25}
-          scale={[1.6, 1.1, 1]}
-        />
+        <group rotation-y={Math.PI * 0.25}>
+          <mesh geometry={PLANE} material={HEARTH_MAT} position={[0, 0.8, 0]} scale={[1.6, 1.1, 1]} />
+          <mesh geometry={BOX} material={STONE_MAT} position={[-1.05, 0.75, -0.2]} scale={[0.5, 1.5, 0.8]} />
+          <mesh geometry={BOX} material={STONE_MAT} position={[1.05, 0.75, -0.2]} scale={[0.5, 1.5, 0.8]} />
+          <mesh geometry={BOX} material={STONE_MAT} position={[0, 1.62, -0.2]} scale={[2.6, 0.45, 0.8]} />
+          <mesh geometry={BOX} material={STONE_MAT} position={[0, 2.4, -0.25]} scale={[1.4, 1.2, 0.6]} />
+        </group>
         <FlickerLight color="#ff8c3b" intensity={18 * lk} distance={18} position={[0.6, 1.2, 0.4]} />
       </group>
 
@@ -121,11 +131,18 @@ export function TavernScene({ dimmed = false }: AmbientSceneProps) {
       {/* Warm dust motes hanging in the firelight. */}
       <ParticleField count={350} color="#d9b98a" size={0.18} area={[26, 7, 22]} speed={0.25} twinkle opacity={0.55} />
 
-      {/* Rafters overhead — hidden in combat so the top-down camera stays clear. */}
-      {!dimmed &&
-        RAFTER_Z.map((z) => (
-          <mesh key={z} geometry={BOX} material={SILHOUETTE} position={[0, 4.6, z]} scale={[14, 0.32, 0.5]} />
-        ))}
+      {/* Back wall: timber posts, beam and warm window glow softened by the fog —
+          hidden in combat so the top-down camera stays clear. */}
+      {!dimmed && (
+        <>
+          {POST_X.map((x) => (
+            <mesh key={x} geometry={BOX} material={WOOD_MAT} position={[x, 2.1, -10]} scale={[0.45, 4.2, 0.45]} />
+          ))}
+          <mesh geometry={BOX} material={WOOD_MAT} position={[0, 4.3, -10]} scale={[18.9, 0.4, 0.45]} />
+          <mesh geometry={PLANE} material={TAVERN_WINDOW_MAT} position={[-6, 1.7, -9.95]} scale={[0.55, 0.7, 1]} />
+          <mesh geometry={PLANE} material={TAVERN_WINDOW_MAT} position={[5.2, 1.5, -9.95]} scale={[0.55, 0.7, 1]} />
+        </>
+      )}
 
       {/* Barrel cluster. */}
       <group position={barrelsPos}>
@@ -348,9 +365,17 @@ function CrystalCluster({
   );
   useEffect(() => () => material.dispose(), [material]);
 
+  // Mutate per-frame through a ref so render-created values stay untouched.
+  const materialRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  useEffect(() => {
+    materialRef.current = material;
+  }, [material]);
+
   useFrame((state) => {
+    const mat = materialRef.current;
+    if (!mat) return;
     // Pulse 0.7 .. 1.3
-    material.emissiveIntensity = 1 + 0.3 * Math.sin(state.clock.elapsedTime * 1.7 + phase);
+    mat.emissiveIntensity = 1 + 0.3 * Math.sin(state.clock.elapsedTime * 1.7 + phase);
   });
 
   return (
@@ -461,10 +486,18 @@ export function TownScene({ dimmed = false }: AmbientSceneProps) {
   );
   useEffect(() => () => windowMaterial.dispose(), [windowMaterial]);
 
+  // Mutate per-frame through a ref so render-created values stay untouched.
+  const windowMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
+  useEffect(() => {
+    windowMaterialRef.current = windowMaterial;
+  }, [windowMaterial]);
+
   useFrame((state) => {
+    const mat = windowMaterialRef.current;
+    if (!mat) return;
     // Window glow flickers between ~0.6 and ~1.0.
     const t = state.clock.elapsedTime;
-    windowMaterial.emissiveIntensity = 0.8 + 0.13 * Math.sin(t * 8.3) + 0.07 * Math.sin(t * 15.1);
+    mat.emissiveIntensity = 0.8 + 0.13 * Math.sin(t * 8.3) + 0.07 * Math.sin(t * 15.1);
   });
 
   return (

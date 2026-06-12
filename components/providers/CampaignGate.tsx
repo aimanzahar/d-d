@@ -2,7 +2,7 @@
 
 import { useQuery } from "convex/react";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { api } from "@/convex/_generated/api";
 import { SessionContext, type Session } from "@/hooks/useSession";
 import { getSessionToken } from "@/lib/session";
@@ -29,16 +29,21 @@ function Splash() {
   );
 }
 
+// The stored token only changes via this tab's own join/leave navigations,
+// so the session-token "store" never pushes updates.
+const subscribeNever = () => () => {};
+
 export function CampaignGate({ children }: { children: ReactNode }) {
   const params = useParams<{ code: string }>();
   const router = useRouter();
   const code = (params.code ?? "").toUpperCase();
 
-  // undefined = localStorage not read yet; null = no token stored
-  const [token, setToken] = useState<string | null | undefined>(undefined);
-  useEffect(() => {
-    setToken(getSessionToken(code));
-  }, [code]);
+  // undefined = server snapshot (localStorage unreadable); null = no token stored
+  const token = useSyncExternalStore<string | null | undefined>(
+    subscribeNever,
+    () => getSessionToken(code),
+    () => undefined,
+  );
 
   const me = useQuery(api.players.resume, token ? { sessionToken: token } : "skip");
 

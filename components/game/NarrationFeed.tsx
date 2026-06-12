@@ -32,6 +32,17 @@ export function NarrationFeed() {
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [lastContent, count]);
 
+  // Stay pinned to the newest line when the panel is drag-resized smaller
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (stickToBottom.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const chronological = [...results].reverse();
 
   return (

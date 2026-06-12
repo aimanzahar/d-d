@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { api } from "@/convex/_generated/api";
+import { usePanelHeight } from "@/hooks/usePanelHeight";
 import { useSession } from "@/hooks/useSession";
 import { ActionInput } from "./ActionInput";
 import { CombatHUD } from "@/components/combat/CombatHUD";
@@ -14,6 +15,34 @@ import { RollPrompt } from "./RollPrompt";
 import { ConvexBridge } from "@/components/providers/ConvexBridge";
 import { StageCanvasLazy } from "@/components/three/StageCanvas.lazy";
 import { BattleMap3D } from "@/components/three/battle";
+
+// Owns the resize state so pointer-rate drag updates re-render only the
+// panel, never the canvas/header/sidebar subtrees.
+function ResizableChatPanel({ gmThinking }: { gmThinking: boolean }) {
+  const { panelHeight, gripProps } = usePanelHeight();
+  return (
+    <div className="pointer-events-auto mx-3 mb-3 panel-notch">
+      <div
+        className="panel-notch-inner flex flex-col"
+        // CSS max as instant backstop while the resize listener re-clamps
+        style={{ height: panelHeight, maxHeight: "calc(100dvh - 240px)" }}
+      >
+        {/* drag grip — resize the panel from its top edge */}
+        <div
+          {...gripProps}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize chat panel"
+          className="flex justify-center items-center w-full py-1.5 cursor-row-resize select-none touch-none shrink-0"
+        >
+          <div className="w-12 h-1 rounded-full bg-gold-dim/50 hover:bg-gold-dim transition-colors" />
+        </div>
+        <NarrationFeed />
+        <ActionInput gmThinking={gmThinking} />
+      </div>
+    </div>
+  );
+}
 
 export function GameScreen() {
   const session = useSession();
@@ -74,12 +103,7 @@ export function GameScreen() {
             {/* transparent battlefield window — clicks reach the canvas */}
             <div className="flex-1 min-h-[120px]" />
 
-            <div className="pointer-events-auto mx-3 mb-3 panel-notch">
-              <div className="panel-notch-inner flex flex-col max-h-[44vh]">
-                <NarrationFeed />
-                <ActionInput gmThinking={campaign.gmStatus === "running"} />
-              </div>
-            </div>
+            <ResizableChatPanel gmThinking={campaign.gmStatus === "running"} />
           </main>
         </div>
       </div>

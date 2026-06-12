@@ -13,6 +13,16 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  // Convex functions run server-side: React hook rules don't apply (helpers
+  // like `useAction` are turn-state utilities, not hooks), and the untyped
+  // SRD JSON payloads make `any` the honest type there.
+  {
+    files: ["convex/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

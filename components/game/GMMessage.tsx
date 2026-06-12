@@ -2,11 +2,12 @@
 
 import { animate, stagger } from "animejs";
 import { useEffect, useRef, useState } from "react";
+import { createStreamingMarkdown, renderGmMarkdown } from "@/lib/markdown";
 
 // Streamed GM narration with incremental word reveal. The message doc's
 // content is APPEND-ONLY while streaming (backend contract), so each update
 // only animates the newly-arrived words. Once complete, the spans collapse
-// back to plain text to keep the DOM light.
+// back to parsed markdown to keep the DOM light.
 export function GMMessage({
   content,
   status,
@@ -16,6 +17,9 @@ export function GMMessage({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const revealedRef = useRef(0);
+  // Created lazily, never reset: NarrationFeed keys each message by _id, so
+  // the component (and this formatter) remounts per message.
+  const markdownRef = useRef<ReturnType<typeof createStreamingMarkdown> | null>(null);
   const [settled, setSettled] = useState(status !== "streaming");
 
   useEffect(() => {
@@ -23,23 +27,45 @@ export function GMMessage({
     const fresh = content.slice(reveatedSafe(revealedRef.current, content));
     if (fresh) {
       revealedRef.current = content.length;
-      const words = fresh.split(/(\s+)/).filter((w) => w.length > 0);
+      markdownRef.current ??= createStreamingMarkdown();
+      // Tokens are whitespace-split words with markers stripped and style
+      // flags attached (slice indexing above stays in raw-content space).
+      const tokens = markdownRef.current.feed(fresh);
       const frag = document.createDocumentFragment();
       const spans: HTMLSpanElement[] = [];
-      for (const word of words) {
+      const revealTo: number[] = [];
+      // Consecutive styled fragments of one word (e.g. bold "Grom" + plain
+      // "'s") share an inline-block wrapper so the word stays one unbreakable
+      // animation unit; whitespace tokens close the current word.
+      let word: HTMLSpanElement | null = null;
+      for (const token of tokens) {
         const span = document.createElement("span");
-        span.textContent = word;
-        if (word.trim()) {
-          span.style.opacity = "0";
-          span.style.display = "inline-block";
-          spans.push(span);
+        span.textContent = token.text;
+        if (token.bold) {
+          span.style.fontWeight = "600";
+          span.style.color = "var(--color-gold-bright)";
         }
-        frag.appendChild(span);
+        if (token.italic || token.quote) span.style.fontStyle = "italic";
+        if (!token.text.trim()) {
+          word = null;
+          frag.appendChild(span);
+          continue;
+        }
+        if (!word) {
+          word = document.createElement("span");
+          word.style.display = "inline-block";
+          word.style.opacity = "0";
+          spans.push(word);
+          // Lightweight quote hint — true blockquote styling lands on settle
+          revealTo.push(token.quote ? 0.92 : 1);
+          frag.appendChild(word);
+        }
+        word.appendChild(span);
       }
       containerRef.current.appendChild(frag);
       if (spans.length > 0) {
         animate(spans, {
-          opacity: [0, 1],
+          opacity: (_: unknown, i?: number) => [0, revealTo[i ?? 0]],
           translateY: [5, 0],
           filter: ["blur(4px)", "blur(0px)"],
           duration: 240,
@@ -61,9 +87,9 @@ export function GMMessage({
     return (
       <div
         key="settled"
-        className="gm-prose font-narrative text-[1.05rem] leading-relaxed text-parchment whitespace-pre-wrap"
+        className="gm-prose font-narrative text-[1.05rem] leading-relaxed text-parchment"
       >
-        {content}
+        {renderGmMarkdown(content)}
         {status === "error" && (
           <span className="block mt-1 font-ui text-xs text-blood italic">
             …the thread of the tale frayed here.

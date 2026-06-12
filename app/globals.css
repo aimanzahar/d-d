@@ -156,3 +156,31 @@ body {
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-gold) 30%, transparent),
     0 0 24px color-mix(in oklab, var(--color-ember) 12%, transparent);
 }
+
+/* GM narration prose: parsed markdown — gold-lit names, gold-edged read-aloud quotes */
+.gm-prose p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.gm-prose p + p,
+.gm-prose blockquote + p,
+.gm-prose p + blockquote,
+.gm-prose blockquote + blockquote {
+  /* one line box, matching the blank line shown while streaming — no jump on settle */
+  margin-top: 1lh;
+}
+.gm-prose blockquote {
+  margin: 0;
+  padding: 0.15em 0 0.15em 0.9em;
+  border-left: 2px solid color-mix(in oklab, var(--color-gold-dim) 60%, transparent);
+  font-style: italic;
+  color: var(--color-parchment-dim);
+  white-space: pre-wrap;
+}
+.gm-prose strong {
+  font-weight: 600;
+  color: var(--color-gold-bright);
+}
+.gm-prose em {
+  font-style: italic;
+}
