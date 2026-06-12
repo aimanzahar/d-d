@@ -1,11 +1,12 @@
 "use client";
 
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { useSession } from "@/hooks/useSession";
 import { Button } from "@/components/ui/Button";
+import { useComposerStore } from "@/stores/composerStore";
 
 export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
   const session = useSession();
@@ -15,12 +16,40 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
   const [ooc, setOoc] = useState(false);
   const [busy, setBusy] = useState(false);
   const [imageNote, setImageNote] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Seed from the composer store (inventory clicks): replace when empty, append when typed.
+  useEffect(
+    () =>
+      useComposerStore.subscribe(({ seed }) => {
+        if (seed === null) return;
+        setText((t) => (t.trim() ? `${t} ${seed}` : seed));
+        textareaRef.current?.focus();
+        useComposerStore.getState().clearSeed();
+      }),
+    [],
+  );
+
+  // The latest image's reactive status drives the persistent "forming" line.
+  const latest = useQuery(api.images.latest, {
+    sessionToken: session.sessionToken,
+    campaignId: session.campaignId,
+  });
+  const forming = latest?.status === "generating";
+  const prevStatus = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevStatus.current === "generating" && latest?.status === "failed") {
+      setImageNote("The vision slipped away.");
+      setTimeout(() => setImageNote(null), 5000);
+    }
+    prevStatus.current = latest?.status ?? null;
+  }, [latest?.status]);
 
   async function handleVisualize() {
     setImageNote(null);
     try {
       await requestImage({ sessionToken: session.sessionToken, campaignId: session.campaignId });
-      setImageNote("The vision is forming…");
+      // success: the reactive `forming` line takes over
     } catch (e) {
       const code = e instanceof ConvexError ? (e.data as { code?: string })?.code : null;
       setImageNote(
@@ -32,8 +61,8 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
               ? "The scrying pool has run dry for today."
               : "The vision slipped away.",
       );
+      setTimeout(() => setImageNote(null), 5000);
     }
-    setTimeout(() => setImageNote(null), 5000);
   }
 
   async function handleSend() {
@@ -60,11 +89,17 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
           The Game Master is weaving the tale…
         </p>
       )}
-      {imageNote && (
+      {forming && (
+        <p className="font-narrative italic text-xs text-arcane-soft mb-2 animate-flicker">
+          The vision is forming…
+        </p>
+      )}
+      {!forming && imageNote && (
         <p className="font-narrative italic text-xs text-arcane-soft mb-2">{imageNote}</p>
       )}
       <div className="flex gap-3 items-end">
         <textarea
+          ref={textareaRef}
           className="field-arcane flex-1 px-3.5 py-2.5 text-[0.95rem] resize-none leading-snug"
           rows={2}
           placeholder={

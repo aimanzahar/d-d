@@ -4,6 +4,7 @@ import { useQuery } from "convex/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { api } from "@/convex/_generated/api";
+import { withBasePath } from "@/lib/basePath";
 import { usePanelHeight } from "@/hooks/usePanelHeight";
 import { useSession } from "@/hooks/useSession";
 import { ActionInput } from "./ActionInput";
@@ -76,7 +77,7 @@ export function GameScreen() {
       <div className="absolute inset-0 z-10 flex flex-col pointer-events-none">
         <header className="pointer-events-auto flex items-center gap-3 px-4 h-12 border-b border-gold-dim/30 bg-ink-soft/70 backdrop-blur shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/logo-96.png" alt="" className="w-7 h-7 rounded-full" aria-hidden />
+          <img src={withBasePath("/brand/logo-96.png")} alt="" className="w-7 h-7 rounded-full" aria-hidden />
           <h1 className="font-display text-sm tracking-[0.15em] text-gold truncate">
             {campaign.name}
           </h1>

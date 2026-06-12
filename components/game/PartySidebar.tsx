@@ -2,11 +2,12 @@
 
 import { animate } from "animejs";
 import { useMutation, useQuery } from "convex/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
-import type { Doc } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { useSession } from "@/hooks/useSession";
 import { Panel } from "@/components/ui/Panel";
+import { InventoryPopout } from "@/components/game/InventoryPopout";
 
 function HpBar({ current, max, temp }: { current: number; max: number; temp: number }) {
   const ghostRef = useRef<HTMLDivElement>(null);
@@ -46,15 +47,39 @@ function HpBar({ current, max, temp }: { current: number; max: number; temp: num
   );
 }
 
-function MemberCard({ character, isMe }: { character: Doc<"characters">; isMe: boolean }) {
+function MemberCard({
+  character,
+  isMe,
+  open,
+  onToggle,
+}: {
+  character: Doc<"characters">;
+  isMe: boolean;
+  open: boolean;
+  onToggle: (top: number) => void;
+}) {
   const session = useSession();
   const levelUp = useMutation(api.characters.levelUp);
   const dead = character.conditions.some((c) => c.name === "dead");
   const down = character.currentHp === 0 && !dead;
   return (
     <Panel
-      className={dead ? "grayscale opacity-60" : ""}
+      className={`cursor-pointer hover:shadow-[0_0_18px_rgba(201,164,92,0.15)] transition-shadow ${
+        dead ? "grayscale opacity-60" : ""
+      }`}
       innerClassName="px-3.5 py-3 space-y-1.5"
+      role="button"
+      tabIndex={0}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      onClick={(e) => onToggle(e.currentTarget.getBoundingClientRect().top)}
+      onKeyDown={(e) => {
+        // keys bubbling up from the Level-up button must not toggle the popout
+        if (e.target !== e.currentTarget) return;
+        if (e.key !== "Enter" && e.key !== " ") return;
+        if (e.key === " ") e.preventDefault();
+        onToggle(e.currentTarget.getBoundingClientRect().top);
+      }}
     >
       <div className="flex items-baseline justify-between gap-2">
         <span className="font-display text-[0.8rem] tracking-wide text-parchment truncate">
@@ -97,7 +122,10 @@ function MemberCard({ character, isMe }: { character: Doc<"characters">; isMe: b
       {isMe && character.pendingLevelUp && (
         <button
           className="w-full mt-1 font-display text-[0.6rem] tracking-[0.25em] uppercase px-2 py-1.5 border border-gold text-gold-bright bg-gold/10 cursor-pointer animate-ember-pulse hover:bg-gold/20"
-          onClick={() => void levelUp({ sessionToken: session.sessionToken })}
+          onClick={(e) => {
+            e.stopPropagation();
+            void levelUp({ sessionToken: session.sessionToken });
+          }}
         >
           ✦ Level up!
         </button>
@@ -112,14 +140,36 @@ export function PartySidebar() {
     sessionToken: session.sessionToken,
     campaignId: session.campaignId,
   });
+  const [popout, setPopout] = useState<{ id: Id<"characters">; top: number } | null>(null);
+  // Re-derive from the live party each render so GM inventory edits appear immediately
+  // (and the popout unmounts if the character vanishes).
+  const popoutCharacter = popout ? (party ?? []).find((c) => c._id === popout.id) : undefined;
   return (
-    <aside className="w-[260px] shrink-0 overflow-y-auto p-3 space-y-3 hidden md:block">
-      <p className="font-display text-[0.6rem] tracking-[0.35em] uppercase text-gold-dim px-1">
-        The Party
-      </p>
-      {(party ?? []).map((c) => (
-        <MemberCard key={c._id} character={c} isMe={c._id === session.characterId} />
-      ))}
-    </aside>
+    <>
+      <aside className="w-[260px] shrink-0 overflow-y-auto p-3 space-y-3 hidden md:block">
+        <p className="font-display text-[0.6rem] tracking-[0.35em] uppercase text-gold-dim px-1">
+          The Party
+        </p>
+        {(party ?? []).map((c) => (
+          <MemberCard
+            key={c._id}
+            character={c}
+            isMe={c._id === session.characterId}
+            open={popout?.id === c._id}
+            onToggle={(top) =>
+              setPopout((p) => (p?.id === c._id ? null : { id: c._id, top }))
+            }
+          />
+        ))}
+      </aside>
+      {popout && popoutCharacter && (
+        <InventoryPopout
+          character={popoutCharacter}
+          isMe={popoutCharacter._id === session.characterId}
+          anchorTop={popout.top}
+          onClose={() => setPopout(null)}
+        />
+      )}
+    </>
   );
 }

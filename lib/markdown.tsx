@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 // GM narration markdown. The model is only instructed to emit **bold**,
 // *italics*, and "> " read-aloud lines (convex/gm/prompt.ts), so this parses
@@ -63,7 +63,42 @@ function parseInline(text: string): InlineSegment[] {
   return segments;
 }
 
-function renderInline(text: string): ReactNode[] {
+// One alternation for every known name: longest-first so "Pulau Bisikan"
+// beats "Pulau", metachars escaped, custom boundaries instead of \b (which
+// breaks on non-ASCII letters) so possessives and punctuation still match
+// ("Rahim's", "Kora,"). Case-sensitive on purpose — proper nouns only.
+function buildNameRegex(names: string[]): RegExp | undefined {
+  const cleaned = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  if (cleaned.length === 0) return undefined;
+  cleaned.sort((a, b) => b.length - a.length);
+  const alternation = cleaned
+    .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  // Leading boundary is a capture group, not a lookbehind — lookbehind throws
+  // at construction on Safari < 16.4 and would crash the whole game screen.
+  return new RegExp(
+    `(^|[^\\p{L}\\p{N}])(${alternation})(?=$|[^\\p{L}\\p{N}])`,
+    "gu",
+  );
+}
+
+// Wrap name matches in the same <strong> the model's own **bold** produces.
+// Only plain text reaches here — already-bold segments are never re-wrapped.
+function highlightNames(text: string, regex: RegExp): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let last = 0;
+  regex.lastIndex = 0;
+  for (const match of text.matchAll(regex)) {
+    const nameStart = match.index + match[1].length;
+    if (nameStart > last) nodes.push(text.slice(last, nameStart));
+    nodes.push(<strong key={nameStart}>{match[2]}</strong>);
+    last = nameStart + match[2].length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
+function renderInline(text: string, highlight?: RegExp): ReactNode[] {
   return parseInline(text).map((seg, i) => {
     if (seg.bold && seg.italic)
       return (
@@ -72,15 +107,20 @@ function renderInline(text: string): ReactNode[] {
         </strong>
       );
     if (seg.bold) return <strong key={i}>{seg.text}</strong>;
-    if (seg.italic) return <em key={i}>{seg.text}</em>;
+    if (seg.italic)
+      return <em key={i}>{highlight ? highlightNames(seg.text, highlight) : seg.text}</em>;
+    if (highlight) return <Fragment key={i}>{highlightNames(seg.text, highlight)}</Fragment>;
     return seg.text;
   });
 }
 
 // Full parse for settled messages: consecutive "> " lines become one
 // <blockquote>, other non-blank runs become <p>. Blank lines only separate
-// blocks — spacing comes from the .gm-prose styles in globals.css.
-export function renderGmMarkdown(content: string): ReactNode {
+// blocks — spacing comes from the .gm-prose styles in globals.css. Known
+// names (party, location, anything the GM has ever bolded) are re-bolded
+// wherever the model forgot the markers.
+export function renderGmMarkdown(content: string, knownNames?: string[]): ReactNode {
+  const highlight = knownNames ? buildNameRegex(knownNames) : undefined;
   const lines = content.split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
@@ -92,7 +132,9 @@ export function renderGmMarkdown(content: string): ReactNode {
         i++;
       }
       blocks.push(
-        <blockquote key={blocks.length}>{renderInline(quote.join("\n"))}</blockquote>,
+        <blockquote key={blocks.length}>
+          {renderInline(quote.join("\n"), highlight)}
+        </blockquote>,
       );
     } else if (lines[i].trim() === "") {
       i++;
@@ -102,7 +144,7 @@ export function renderGmMarkdown(content: string): ReactNode {
         para.push(lines[i]);
         i++;
       }
-      blocks.push(<p key={blocks.length}>{renderInline(para.join("\n"))}</p>);
+      blocks.push(<p key={blocks.length}>{renderInline(para.join("\n"), highlight)}</p>);
     }
   }
   return blocks;

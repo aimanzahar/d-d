@@ -79,7 +79,20 @@ export const requestSceneImage = mutation({
       status: "generating",
     });
     await ctx.scheduler.runAfter(0, internal.images.generate, { imageId });
+    // Watchdog: if the generate action dies without reaching finish/fail
+    // (deploy, restart), don't leave "generating" — and its UI banner — stuck.
+    await ctx.scheduler.runAfter(5 * 60_000, internal.images.failIfStillGenerating, { imageId });
     return { imageId };
+  },
+});
+
+export const failIfStillGenerating = internalMutation({
+  args: { imageId: v.id("images") },
+  handler: async (ctx, args) => {
+    const image = await ctx.db.get(args.imageId);
+    if (image?.status === "generating") {
+      await ctx.db.patch(args.imageId, { status: "failed", error: "timed out" });
+    }
   },
 });
 
@@ -165,6 +178,20 @@ export const fail = internalMutation({
   args: { imageId: v.id("images"), error: v.string() },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.imageId, { status: "failed", error: args.error });
+  },
+});
+
+// Most recent image's status — drives the persistent "vision is forming" note.
+export const latest = query({
+  args: { sessionToken: v.string(), campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    await requirePlayer(ctx, args.sessionToken, args.campaignId);
+    const image = await ctx.db
+      .query("images")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .order("desc")
+      .first();
+    return image ? { status: image.status } : null;
   },
 });
 

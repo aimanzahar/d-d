@@ -11,9 +11,13 @@ import { createStreamingMarkdown, renderGmMarkdown } from "@/lib/markdown";
 export function GMMessage({
   content,
   status,
+  knownNames,
 }: {
   content: string;
   status: "streaming" | "complete" | "error";
+  // Names to re-bold in the settled render; streaming stays marker-only and
+  // full highlighting lands at the settle swap.
+  knownNames?: string[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const revealedRef = useRef(0);
@@ -89,7 +93,7 @@ export function GMMessage({
         key="settled"
         className="gm-prose font-narrative text-[1.05rem] leading-relaxed text-parchment"
       >
-        {renderGmMarkdown(content)}
+        {renderGmMarkdown(content, knownNames)}
         {status === "error" && (
           <span className="block mt-1 font-ui text-xs text-blood italic">
             …the thread of the tale frayed here.

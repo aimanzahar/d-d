@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { useAnimeScope } from "@/hooks/useAnimeScope";
+import { withBasePath } from "@/lib/basePath";
 import { saveSessionToken } from "@/lib/session";
 import { Button } from "@/components/ui/Button";
 import { Label, TextArea, TextInput } from "@/components/ui/Field";
@@ -112,158 +113,165 @@ export function LandingScreen() {
   const title = "EMBERQUILL";
 
   return (
-    <div ref={root} className="relative flex-1 flex flex-col items-center justify-center px-6 py-16 overflow-hidden">
-      {/* hero art backdrop, masked into the ink */}
-      <div
-        className="absolute inset-0 pointer-events-none opacity-40"
-        style={{
-          backgroundImage: "url(/brand/hero.jpg)",
-          backgroundSize: "cover",
-          backgroundPosition: "center 30%",
-          maskImage:
-            "radial-gradient(95% 80% at 50% 35%, black 30%, transparent 78%)",
-          WebkitMaskImage:
-            "radial-gradient(95% 80% at 50% 35%, black 30%, transparent 78%)",
-        }}
-        aria-hidden
-      />
-      {/* rising embers */}
-      <div className="absolute inset-x-0 bottom-0 h-[55vh] pointer-events-none" aria-hidden>
-        {Array.from({ length: 20 }).map((_, i) => (
-          <span
-            key={i}
-            className="ember-mote absolute bottom-0 w-[3px] h-[3px] rounded-full opacity-0"
-            style={{
-              left: `${4 + (i * 92) / 20 + (i % 3) * 1.5}%`,
-              background: i % 4 === 0 ? "var(--color-gold-bright)" : "var(--color-ember-bright)",
-              boxShadow: "0 0 6px currentColor",
-            }}
-          />
-        ))}
+    <div ref={root} className="relative flex-1 flex flex-col px-6">
+      {/* Decorative layers clipped on their own so the page itself can still
+          grow and scroll when a short viewport can't fit the forms */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
+        {/* hero art backdrop, masked into the ink */}
+        <div
+          className="absolute inset-0 opacity-40"
+          style={{
+            backgroundImage: `url(${withBasePath("/brand/hero.jpg")})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center 30%",
+            maskImage:
+              "radial-gradient(95% 80% at 50% 35%, black 30%, transparent 78%)",
+            WebkitMaskImage:
+              "radial-gradient(95% 80% at 50% 35%, black 30%, transparent 78%)",
+          }}
+        />
+        {/* rising embers */}
+        <div className="absolute inset-x-0 bottom-0 h-[55vh]">
+          {Array.from({ length: 20 }).map((_, i) => (
+            <span
+              key={i}
+              className="ember-mote absolute bottom-0 w-[3px] h-[3px] rounded-full opacity-0"
+              style={{
+                left: `${4 + (i * 92) / 20 + (i % 3) * 1.5}%`,
+                background: i % 4 === 0 ? "var(--color-gold-bright)" : "var(--color-ember-bright)",
+                boxShadow: "0 0 6px currentColor",
+              }}
+            />
+          ))}
+        </div>
       </div>
 
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/brand/logo-512.png"
-        alt="Emberquill emblem — a quill crossed with a d20"
-        className="hero-rise relative w-24 h-24 sm:w-28 sm:h-28 mb-4 opacity-0 rounded-full shadow-[0_0_48px_rgba(232,114,42,0.25)]"
-      />
-      <p className="hero-rise relative font-display text-[0.7rem] tracking-[0.5em] text-gold-dim uppercase mb-5 opacity-0">
-        An AI Game Master awaits
-      </p>
+      <div className="relative flex-1 flex flex-col items-center justify-center py-6 w-full">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={withBasePath("/brand/logo-512.png")}
+          alt="Emberquill emblem — a quill crossed with a d20"
+          className="hero-rise relative w-24 h-24 sm:w-28 sm:h-28 mb-3 opacity-0 rounded-full shadow-[0_0_48px_rgba(232,114,42,0.25)]"
+        />
+        <p className="hero-rise relative font-display text-[0.7rem] tracking-[0.5em] text-gold-dim uppercase mb-4 opacity-0">
+          An AI Game Master awaits
+        </p>
 
-      <h1 className="font-display font-800 text-5xl sm:text-7xl md:text-8xl gold-text leading-none mb-6 select-none">
-        {title.split("").map((ch, i) => (
-          <span key={i} className="hero-char inline-block opacity-0">
-            {ch}
-          </span>
-        ))}
-      </h1>
+        <h1 className="font-display font-800 text-5xl sm:text-7xl md:text-8xl leading-none mb-5 select-none">
+          {/* gold-text sits on each span: background-clip:text can't reach
+              through the inline-block char boxes the animation needs */}
+          {title.split("").map((ch, i) => (
+            <span key={i} className="hero-char gold-text inline-block opacity-0">
+              {ch}
+            </span>
+          ))}
+        </h1>
 
-      <div className="hero-rise w-64 opacity-0">
-        <OrnateRule />
-      </div>
+        <div className="hero-rise w-64 opacity-0">
+          <OrnateRule />
+        </div>
 
-      <p className="hero-rise font-narrative italic text-lg sm:text-xl text-parchment-dim mt-6 mb-12 max-w-xl text-center opacity-0">
-        Gather your companions. The quill writes the world, the dice decide your place in it
-        &mdash; and the Game Master never sleeps.
-      </p>
+        <p className="hero-rise font-narrative italic text-lg sm:text-xl text-parchment-dim mt-5 mb-8 max-w-xl text-center opacity-0">
+          Gather your companions. The quill writes the world, the dice decide your place in it
+          &mdash; and the Game Master never sleeps.
+        </p>
 
-      <div className="hero-rise grid md:grid-cols-2 gap-6 w-full max-w-4xl opacity-0">
-        {/* Forge a campaign */}
-        <Panel innerClassName="p-7">
-          <h2 className="font-display text-base tracking-[0.2em] text-gold mb-6 uppercase">
-            Forge a Campaign
-          </h2>
-          <div className="space-y-4">
-            <label className="block">
-              <Label>Campaign name</Label>
-              <TextInput
-                value={campaignName}
-                onChange={(e) => setCampaignName(e.target.value)}
-                placeholder="The Ashes of Veldrenmoor"
-                maxLength={60}
-              />
-            </label>
-            <label className="block">
-              <Label>Your name</Label>
-              <TextInput
-                value={hostName}
-                onChange={(e) => setHostName(e.target.value)}
-                placeholder="What the table calls you"
-                maxLength={24}
-              />
-            </label>
-            <label className="block">
-              <Label>The premise — seed for your Game Master</Label>
-              <TextArea
-                rows={4}
-                value={premise}
-                onChange={(e) => setPremise(e.target.value)}
-                placeholder="A mining town has gone silent beneath a red comet. The last caravan returned empty, horses still in harness…"
-                maxLength={2000}
-              />
-            </label>
+        <div className="hero-rise grid md:grid-cols-2 gap-6 w-full max-w-4xl opacity-0">
+          {/* Forge a campaign */}
+          <Panel innerClassName="p-7">
+            <h2 className="font-display text-base tracking-[0.2em] text-gold mb-6 uppercase">
+              Forge a Campaign
+            </h2>
+            <div className="space-y-4">
+              <label className="block">
+                <Label>Campaign name</Label>
+                <TextInput
+                  value={campaignName}
+                  onChange={(e) => setCampaignName(e.target.value)}
+                  placeholder="The Ashes of Veldrenmoor"
+                  maxLength={60}
+                />
+              </label>
+              <label className="block">
+                <Label>Your name</Label>
+                <TextInput
+                  value={hostName}
+                  onChange={(e) => setHostName(e.target.value)}
+                  placeholder="What the table calls you"
+                  maxLength={24}
+                />
+              </label>
+              <label className="block">
+                <Label>The premise — seed for your Game Master</Label>
+                <TextArea
+                  rows={4}
+                  value={premise}
+                  onChange={(e) => setPremise(e.target.value)}
+                  placeholder="A mining town has gone silent beneath a red comet. The last caravan returned empty, horses still in harness…"
+                  maxLength={2000}
+                />
+              </label>
+              <Button
+                variant="ember"
+                size="lg"
+                className="w-full"
+                disabled={busy || !campaignName.trim() || !hostName.trim() || !premise.trim()}
+                onClick={handleCreate}
+              >
+                Light the candles
+              </Button>
+            </div>
+          </Panel>
+
+          {/* Join by code */}
+          <Panel innerClassName="p-7 flex flex-col">
+            <h2 className="font-display text-base tracking-[0.2em] text-gold mb-6 uppercase">
+              Join by Code
+            </h2>
+            <div className="space-y-4 flex-1">
+              <label className="block">
+                <Label>Invite code</Label>
+                <TextInput
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  placeholder="KQ7M2X"
+                  maxLength={6}
+                  className="font-dice tracking-[0.45em] text-center text-lg uppercase"
+                />
+              </label>
+              <label className="block">
+                <Label>Your name</Label>
+                <TextInput
+                  value={joinName}
+                  onChange={(e) => setJoinName(e.target.value)}
+                  placeholder="What the table will call you"
+                  maxLength={24}
+                />
+              </label>
+            </div>
+            <p className="font-narrative italic text-sm text-parchment-faint my-5">
+              Six letters from a friend are all it takes to pull up a chair.
+            </p>
             <Button
-              variant="ember"
+              variant="gold"
               size="lg"
               className="w-full"
-              disabled={busy || !campaignName.trim() || !hostName.trim() || !premise.trim()}
-              onClick={handleCreate}
+              disabled={busy || joinCode.trim().length !== 6 || !joinName.trim()}
+              onClick={handleJoin}
             >
-              Light the candles
+              Take your seat
             </Button>
-          </div>
-        </Panel>
+          </Panel>
+        </div>
 
-        {/* Join by code */}
-        <Panel innerClassName="p-7 flex flex-col">
-          <h2 className="font-display text-base tracking-[0.2em] text-gold mb-6 uppercase">
-            Join by Code
-          </h2>
-          <div className="space-y-4 flex-1">
-            <label className="block">
-              <Label>Invite code</Label>
-              <TextInput
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                placeholder="KQ7M2X"
-                maxLength={6}
-                className="font-dice tracking-[0.45em] text-center text-lg uppercase"
-              />
-            </label>
-            <label className="block">
-              <Label>Your name</Label>
-              <TextInput
-                value={joinName}
-                onChange={(e) => setJoinName(e.target.value)}
-                placeholder="What the table will call you"
-                maxLength={24}
-              />
-            </label>
-          </div>
-          <p className="font-narrative italic text-sm text-parchment-faint my-5">
-            Six letters from a friend are all it takes to pull up a chair.
+        {error && (
+          <p className="mt-6 text-blood font-narrative italic text-base" role="alert">
+            {error}
           </p>
-          <Button
-            variant="gold"
-            size="lg"
-            className="w-full"
-            disabled={busy || joinCode.trim().length !== 6 || !joinName.trim()}
-            onClick={handleJoin}
-          >
-            Take your seat
-          </Button>
-        </Panel>
+        )}
       </div>
 
-      {error && (
-        <p className="mt-6 text-blood font-narrative italic text-base" role="alert">
-          {error}
-        </p>
-      )}
-
-      <p className="absolute bottom-4 inset-x-0 text-center text-[0.65rem] text-parchment-faint/70 px-6">
+      <p className="relative text-center text-[0.65rem] text-parchment-faint/70 py-3">
         Includes material from the System Reference Document 5.1 by Wizards of the Coast LLC,
         licensed under CC-BY-4.0.
       </p>

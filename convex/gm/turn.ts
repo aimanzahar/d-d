@@ -3,7 +3,7 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { internalAction, internalMutation } from "../_generated/server";
-import { chatStream, embed, type ChatMessage, type ToolCall } from "../lib/llm";
+import { chatStream, embed, type ChatMessage, type StreamResult, type ToolCall } from "../lib/llm";
 import { search } from "../lib/qdrant";
 import { BASE_PROMPT, COMBAT_ADDENDUM, EXPLORATION_ADDENDUM } from "./prompt";
 import { dispatchTool, TOOL_DEFS } from "./tools";
@@ -12,6 +12,9 @@ const MAX_ITERATIONS = 6;
 const TURN_DEADLINE_MS = 7 * 60 * 1000;
 const FLUSH_CHARS = 300;
 const FLUSH_MS = 250;
+// Reasoning tokens count against max_tokens, so keep enough headroom that the
+// model's chain-of-thought can never starve the narration itself.
+const GM_MAX_TOKENS = 3000;
 
 // Verifies this scheduled run still owns the lock (kills stale duplicates).
 export const claimTurn = internalMutation({
@@ -144,18 +147,23 @@ export const respond = internalAction({
 
       const errorBudget = new Map<string, number>();
       let endTurn = false;
+      let streamedChars = 0;
+      let result: StreamResult | undefined;
       const maxIterations = context.mode === "combat" ? 10 : MAX_ITERATIONS;
+      const onText = async (delta: string) => {
+        buffer += delta;
+        // trim: a bare "\n" alongside a tool call is not narration
+        streamedChars += delta.trim().length;
+        await flush();
+      };
 
       for (let iteration = 0; iteration < maxIterations && !endTurn; iteration++) {
         const overDeadline = Date.now() - startedAt > TURN_DEADLINE_MS;
-        const result = await chatStream({
+        result = await chatStream({
           messages: transcript,
           tools: overDeadline ? undefined : TOOL_DEFS,
-          maxTokens: 900,
-          onText: async (delta) => {
-            buffer += delta;
-            await flush();
-          },
+          maxTokens: GM_MAX_TOKENS,
+          onText,
         });
 
         if (result.finishReason !== "tool_calls" || result.toolCalls.length === 0) break;
@@ -182,10 +190,33 @@ export const respond = internalAction({
         }
       }
 
+      // Reasoning models can burn the whole token budget on hidden
+      // chain-of-thought and stream zero narration. Unless we're legitimately
+      // waiting on a player's dice, retry once without tools so the turn
+      // never ends in silence.
+      if (streamedChars === 0 && !endTurn) {
+        console.error(
+          `GM produced no narration (finishReason=${result?.finishReason}); retrying without tools`,
+        );
+        // When the loop broke without tool calls the assistant turn was never
+        // pushed — restore role alternation or strict backends reject the retry.
+        if (result && (result.finishReason !== "tool_calls" || result.toolCalls.length === 0)) {
+          transcript.push({ role: "assistant", content: result.content || "(no narration)" });
+        }
+        transcript.push({
+          role: "user",
+          content:
+            "(Your previous reply contained no narration text. Respond now with in-world narration for the player. Do not call tools.)",
+        });
+        await chatStream({ messages: transcript, maxTokens: GM_MAX_TOKENS, onText });
+      }
+
       await flush(true);
+      // A silent dice-wait (endTurn) is healthy — the roll prompt is up and
+      // the feed's ghost guard drops the empty row; only true silence errors.
       await ctx.runMutation(internal.messages.finalizeGmMessage, {
         messageId: gmMessageId,
-        status: "complete",
+        status: streamedChars > 0 || endTurn ? "complete" : "error",
       });
 
       // Combat safety net: if a monster is still the active combatant after

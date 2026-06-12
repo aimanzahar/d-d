@@ -1,7 +1,7 @@
 "use client";
 
-import { usePaginatedQuery } from "convex/react";
-import { useEffect, useRef } from "react";
+import { usePaginatedQuery, useQuery } from "convex/react";
+import { useEffect, useMemo, useRef } from "react";
 import { api } from "@/convex/_generated/api";
 import { useSession } from "@/hooks/useSession";
 import { GMMessage } from "./GMMessage";
@@ -16,6 +16,35 @@ export function NarrationFeed() {
   );
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+
+  // Dictionary for GM name highlighting: party names, the current location,
+  // and anything the GM has ever **bolded**. Both queries are already live
+  // elsewhere (PartySidebar, GameScreen) — Convex dedupes subscriptions.
+  const party = useQuery(api.characters.getParty, {
+    sessionToken: session.sessionToken,
+    campaignId: session.campaignId,
+  });
+  const campaign = useQuery(api.campaigns.get, {
+    sessionToken: session.sessionToken,
+    inviteCode: session.inviteCode,
+  });
+  const knownNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const c of party ?? []) names.add(c.name);
+    if (campaign) names.add(campaign.location.name);
+    for (const m of results) {
+      if (m.kind !== "gm") continue;
+      for (const match of m.content.matchAll(/\*\*([^*\n]+)\*\*/g)) {
+        const name = match[1].trim();
+        // names are short, capitalized, few words — skip bold emphasis
+        // like "**cannot**" so it doesn't gold-light everywhere forever
+        if (name && name.length <= 40 && /^\p{Lu}/u.test(name) && name.split(/\s+/).length <= 4) {
+          names.add(name);
+        }
+      }
+    }
+    return [...names].sort();
+  }, [party, campaign, results]);
 
   // Track whether the reader is near the bottom
   function onScroll() {
@@ -59,9 +88,12 @@ export function NarrationFeed() {
       {chronological.map((m) => {
         switch (m.kind) {
           case "gm":
+            // Ghost rows: a completed message with no real content would
+            // render as a blank line — drop it (a few exist in prod)
+            if (m.content.trim() === "" && m.status === "complete") return null;
             return (
-              <div key={m._id} className="max-w-prose">
-                <GMMessage content={m.content} status={m.status} />
+              <div key={m._id}>
+                <GMMessage content={m.content} status={m.status} knownNames={knownNames} />
               </div>
             );
           case "player":
