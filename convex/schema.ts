@@ -36,6 +36,7 @@ export default defineSchema({
     image: v.optional(v.string()),
     failedLogins: v.optional(v.number()),
     lockedUntil: v.optional(v.number()),
+    lastInspiredAt: v.optional(v.number()), // "inspire me" LLM-call cooldown
   })
     .index("by_email", ["email"])
     .index("by_googleSub", ["googleSub"]),

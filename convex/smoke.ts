@@ -272,3 +272,78 @@ export const pbkdf2 = internalAction({
     return { ok: bits.byteLength === 32, ms: Date.now() - t0 };
   },
 });
+
+// Probe: what max_tokens does the gateway group actually accept for the GM
+// model? Run: npx convex run smoke:maxTokensProbe '{"budget": 65536}'
+export const maxTokensProbe = internalAction({
+  args: { budget: v.number() },
+  handler: async (_ctx, args) => {
+    const res = await fetch(`${process.env.LLM_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.LLM_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "deepseek-v4-pro",
+        max_tokens: args.budget,
+        messages: [{ role: "user", content: "Reply with the single word: ok" }],
+      }),
+    });
+    const body = (await res.text()).slice(0, 200);
+    return { budget: args.budget, status: res.status, ok: res.ok, body: res.ok ? "(ok)" : body };
+  },
+});
+
+// Probe 2: does the gateway accept response_format json_schema for this model?
+export const jsonSchemaProbe = internalAction({
+  args: {},
+  handler: async () => {
+    const res = await fetch(`${process.env.LLM_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.LLM_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "deepseek-v4-pro",
+        max_tokens: 384000,
+        temperature: 1.0,
+        messages: [{ role: "user", content: "Give me one word as JSON: {\"word\": ...}" }],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "probe",
+            schema: { type: "object", properties: { word: { type: "string" } }, required: ["word"], additionalProperties: false },
+            strict: true,
+          },
+        },
+      }),
+    });
+    return { status: res.status, body: (await res.text()).slice(0, 300) };
+  },
+});
+
+// Probe 3: plain json_object mode instead of json_schema
+export const jsonObjectProbe = internalAction({
+  args: {},
+  handler: async () => {
+    const res = await fetch(`${process.env.LLM_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.LLM_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "deepseek-v4-pro",
+        max_tokens: 8000,
+        messages: [
+          { role: "user", content: 'Reply with a single JSON object {"word": <one word>} and nothing else.' },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+    const text = await res.text();
+    return { status: res.status, body: text.slice(0, 300) };
+  },
+});

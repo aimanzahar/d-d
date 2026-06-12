@@ -1,7 +1,7 @@
 "use client";
 
 import { animate, stagger, utils } from "animejs";
-import { useMutation } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import { ConvexError } from "convex/values";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -24,6 +24,8 @@ const ERRORS: Record<string, string> = {
   campaign_full: "The table is full. Six adventurers is a crowd already.",
   nickname_taken: "Someone at that table already bears this name.",
   invalid_account: "Your ledger entry has expired — sign in again.",
+  muse_cooldown: "The muse needs a breath — try again in a moment.",
+  muse_silent: "The muse is silent. Try again.",
 };
 
 function errorMessage(e: unknown): string {
@@ -46,7 +48,25 @@ export function LandingScreen() {
   const [joinCode, setJoinCode] = useState("");
   const [joinName, setJoinName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [inspiring, setInspiring] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inspire = useAction(api.inspiration.generate);
+
+  // Fills BOTH forge fields — clicking the muse means "write it for me".
+  async function handleInspire() {
+    if (!accountToken || inspiring) return;
+    setInspiring(true);
+    setError(null);
+    try {
+      const seed = await inspire({ accountToken });
+      setCampaignName(seed.name);
+      setPremise(seed.premise);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setInspiring(false);
+    }
+  }
 
   const root = useAnimeScope<HTMLDivElement>(() => {
     // Title chars rise out of blur, staggered from center
@@ -240,7 +260,22 @@ export function LandingScreen() {
                     />
                   </label>
                   <label className="block">
-                    <Label>The premise — seed for your Game Master</Label>
+                    <span className="flex items-center justify-between mb-1.5">
+                      <span className="font-display text-[0.65rem] tracking-[0.22em] uppercase text-gold-dim">
+                        The premise — seed for your Game Master
+                      </span>
+                      <button
+                        type="button"
+                        className={`font-display text-[0.55rem] tracking-[0.2em] uppercase px-2 py-1 border border-arcane/40 text-arcane-soft hover:border-arcane cursor-pointer disabled:cursor-default disabled:hover:border-arcane/40 shrink-0 ml-3 ${
+                          inspiring ? "animate-flicker" : ""
+                        }`}
+                        disabled={inspiring}
+                        onClick={handleInspire}
+                        title="Let the muse write a name and premise for you"
+                      >
+                        {inspiring ? "consulting the muse…" : "✦ inspire me"}
+                      </button>
+                    </span>
                     <TextArea
                       rows={4}
                       value={premise}

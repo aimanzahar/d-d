@@ -166,8 +166,11 @@ export async function chatStream(opts: {
   return { content, toolCalls, finishReason };
 }
 
-// Non-streaming call with strict JSON schema output. Used by the memorizer
-// and other structured side-channels — never for live narration.
+// Non-streaming structured-output call. Used by the memorizer and other
+// structured side-channels — never for live narration. The gateway has no
+// upstream supporting strict `json_schema` for this model (it answers 429
+// "group saturated"), so we use plain json_object mode with the schema
+// embedded in the prompt and parse defensively.
 export async function chatJson<T>(opts: {
   messages: ChatMessage[];
   schemaName: string;
@@ -175,6 +178,15 @@ export async function chatJson<T>(opts: {
   maxTokens?: number;
   temperature?: number;
 }): Promise<T> {
+  const schemaNote = `Respond with ONLY a single JSON object matching this JSON Schema ("${opts.schemaName}") — no markdown fences, no commentary:\n${JSON.stringify(opts.schema)}`;
+  const messages = [...opts.messages];
+  const last = messages[messages.length - 1];
+  if (last?.role === "user") {
+    messages[messages.length - 1] = { ...last, content: `${last.content}\n\n${schemaNote}` };
+  } else {
+    messages.push({ role: "user", content: schemaNote });
+  }
+
   const res = await fetchWithRetry(`${env("LLM_BASE_URL")}/chat/completions`, {
     method: "POST",
     headers: {
@@ -185,18 +197,20 @@ export async function chatJson<T>(opts: {
       model: GM_MODEL,
       max_tokens: opts.maxTokens ?? MAX_OUTPUT_TOKENS,
       temperature: opts.temperature ?? 0.3,
-      messages: opts.messages,
-      response_format: {
-        type: "json_schema",
-        json_schema: { name: opts.schemaName, schema: opts.schema, strict: true },
-      },
+      messages,
+      response_format: { type: "json_object" },
     }),
   });
   if (!res.ok) throw new Error(`LLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const json = await res.json();
-  const text = json.choices?.[0]?.message?.content;
+  const text: string | undefined = json.choices?.[0]?.message?.content;
   if (!text) throw new Error("LLM returned no content for JSON call");
-  return JSON.parse(text) as T;
+  // Belt and braces: some models fence the JSON anyway
+  const stripped = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+  return JSON.parse(stripped) as T;
 }
 
 // Batch-embeds texts. Returns one EMBEDDING_DIM vector per input.
