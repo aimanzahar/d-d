@@ -6,6 +6,7 @@ import { ConvexError, v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { deriveArmorAndAc } from "./characters";
 import { levelForXp } from "./lib/rules5e";
 import { CONDITION_NAMES } from "./srd/static";
 
@@ -160,7 +161,9 @@ export const modifyInventory = internalMutation({
       );
       if (existing) existing.quantity += qty;
       else inventory.push({ itemIndex: args.itemIndex, name: args.itemName, quantity: qty, equipped: false });
-    } else {
+    }
+    let lostEquipped = false;
+    if (args.action === "remove") {
       const idx = inventory.findIndex(
         (i) => i.name.toLowerCase() === args.itemName.toLowerCase() || i.itemIndex === args.itemIndex,
       );
@@ -171,13 +174,26 @@ export const modifyInventory = internalMutation({
         };
       }
       inventory[idx].quantity -= qty;
-      if (inventory[idx].quantity <= 0) inventory.splice(idx, 1);
+      if (inventory[idx].quantity <= 0) {
+        lostEquipped = inventory[idx].equipped;
+        inventory.splice(idx, 1);
+      }
     }
     const currency = { ...character.currency };
     if (args.goldDelta) {
       currency.gp = Math.max(0, currency.gp + args.goldDelta);
     }
-    await ctx.db.patch(args.characterId, { inventory, currency });
+    // Losing equipped armor/shield changes AC — phantom +2s must not linger.
+    const patch: Record<string, unknown> = { inventory, currency };
+    if (lostEquipped) {
+      const { ac } = await deriveArmorAndAc(ctx, {
+        classIndex: character.classIndex,
+        abilities: character.abilities,
+        inventory,
+      });
+      patch.ac = ac;
+    }
+    await ctx.db.patch(args.characterId, patch);
     return { ok: true, gold: currency.gp };
   },
 });

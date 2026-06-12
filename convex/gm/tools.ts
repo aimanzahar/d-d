@@ -96,7 +96,8 @@ export const TOOL_DEFS: ToolDef[] = [
     type: "function",
     function: {
       name: "modify_inventory",
-      description: "Give or take items and/or gold. Use itemIndex for SRD items when you know it ('longsword'); otherwise itemName alone for custom loot.",
+      description:
+        "Add or remove items and/or gold. Call with action 'remove' whenever a character expends, throws, drinks, gives away, or loses an item (ammunition, potions, thrown daggers); 'add' for loot, purchases, or recovering thrown weapons. Use itemIndex for SRD items when you know it ('longsword'); otherwise itemName alone for custom loot.",
       parameters: {
         type: "object",
         properties: {

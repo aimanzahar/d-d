@@ -83,7 +83,17 @@ function baseGeometry(sides: DieSides): THREE.BufferGeometry {
   }
 }
 
-function createFaceMaterial(value: number, isMax: boolean): THREE.MeshStandardMaterial {
+// The face texture maps edge-to-edge onto the face polygon, so the numeral
+// must stay WELL inside it — on triangular faces (d4/d8/d20) the inscribed
+// safe zone is small, and oversized digits visually collide with neighboring
+// faces' digits at shared edges ("numbers overlapping").
+const FONT_PX: Record<DieSides, number> = { 4: 34, 6: 50, 8: 38, 10: 42, 12: 44, 20: 32 };
+
+function createFaceMaterial(
+  value: number,
+  isMax: boolean,
+  sides: DieSides,
+): THREE.MeshStandardMaterial {
   const canvas = document.createElement("canvas");
   canvas.width = 128;
   canvas.height = 128;
@@ -92,20 +102,24 @@ function createFaceMaterial(value: number, isMax: boolean): THREE.MeshStandardMa
   ctx.fillStyle = OBSIDIAN;
   ctx.fillRect(0, 0, 128, 128);
 
-  // subtle engraved border ring
+  const font = FONT_PX[sides];
+
+  // subtle engraved ring hugging the numeral, not the face edge
   ctx.strokeStyle = GOLD_RING;
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(64, 64, 47, 0, Math.PI * 2);
+  ctx.arc(64, 64, font * 0.72, 0, Math.PI * 2);
   ctx.stroke();
 
   ctx.fillStyle = isMax ? GOLD_BRIGHT : PARCHMENT;
-  ctx.font = "bold 64px monospace";
+  ctx.font = `bold ${font}px monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(String(value), 64, 66);
+  ctx.fillText(String(value), 64, 65);
   // underline 6 and 9 so they cannot be confused at arbitrary orientations
-  if (value === 6 || value === 9) ctx.fillRect(46, 100, 36, 4);
+  if (value === 6 || value === 9) {
+    ctx.fillRect(64 - font * 0.28, 64 + font * 0.56, font * 0.56, Math.max(2, font * 0.06));
+  }
 
   const map = new THREE.CanvasTexture(canvas);
   map.colorSpace = THREE.SRGBColorSpace;
@@ -212,10 +226,19 @@ export function buildDie(sides: DieSides): DieBuild {
       }
     }
 
-    // normalize this face's UV slice to 0..1, uniform scale, centered at 0.5
+    // Normalize this face's UV slice: uniform scale from the bbox, but center
+    // on the polygon CENTROID — bbox-centering puts the numeral off the face
+    // middle on triangles/kites, cropping digits at edges. (Texture clamps to
+    // edge; the canvas is plain obsidian out there, so spill is invisible.)
     const scale = Math.max(maxU - minU, maxV - minV) || 1;
-    const cu = (minU + maxU) / 2;
-    const cv = (minV + maxV) / 2;
+    let cu = 0;
+    let cv = 0;
+    for (let k = start; k < start + count; k++) {
+      cu += outUv[k * 2];
+      cv += outUv[k * 2 + 1];
+    }
+    cu /= count;
+    cv /= count;
     for (let k = start; k < start + count; k++) {
       outUv[k * 2] = 0.5 + (outUv[k * 2] - cu) / scale;
       outUv[k * 2 + 1] = 0.5 + (outUv[k * 2 + 1] - cv) / scale;
@@ -234,7 +257,7 @@ export function buildDie(sides: DieSides): DieBuild {
   // visually remaps the settled face to the server result afterwards.
   const faceValues = clusters.map((_, i) => i + 1);
   const materials: THREE.Material[] = faceValues.map((value) =>
-    createFaceMaterial(value, value === sides),
+    createFaceMaterial(value, value === sides, sides),
   );
 
   const build: DieBuild = { geometry, materials, faceNormals, faceValues };

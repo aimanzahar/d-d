@@ -1,4 +1,4 @@
-import { internalAction, internalMutation } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 
 // Phase 0 smoke test: validates every external integration from inside the
@@ -345,5 +345,17 @@ export const jsonObjectProbe = internalAction({
     });
     const text = await res.text();
     return { status: res.status, body: text.slice(0, 300) };
+  },
+});
+
+// Icon pipeline: enumerate all SRD equipment for scripts/generate-item-icons.mjs
+export const listEquipment = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const docs = await ctx.db
+      .query("srd")
+      .withIndex("by_category_index", (q) => q.eq("category", "equipment"))
+      .collect();
+    return docs.map((d) => ({ index: d.index, name: (d.data as { name?: string })?.name ?? d.index }));
   },
 });

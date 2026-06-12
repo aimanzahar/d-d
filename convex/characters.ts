@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { requirePlayer } from "./lib/auth";
 import {
   ABILITY_KEYS,
@@ -15,6 +15,48 @@ const pickValidator = v.object({
   key: v.string(),
   categoryPicks: v.optional(v.array(v.array(v.string()))),
 });
+
+type InventoryItem = { itemIndex?: string; name: string; quantity: number; equipped: boolean };
+
+// AC from whatever the inventory says is EQUIPPED — flags are player-controlled
+// via setEquipped; create() marks its best-armor picks first, then calls this.
+export async function deriveArmorAndAc(
+  ctx: QueryCtx,
+  opts: { classIndex: string; abilities: Record<AbilityKey, number>; inventory: InventoryItem[] },
+): Promise<{ ac: number }> {
+  let equippedArmor: { base: number; dexBonus: boolean; maxBonus?: number } | null = null;
+  let hasShield = false;
+  for (const item of opts.inventory) {
+    if (!item.equipped || !item.itemIndex) continue;
+    const doc = await ctx.db
+      .query("srd")
+      .withIndex("by_category_index", (q) =>
+        q.eq("category", "equipment").eq("index", item.itemIndex!),
+      )
+      .unique();
+    const data = doc?.data as any;
+    if (!data?.armor_class) continue;
+    if (data.armor_category === "Shield") {
+      hasShield = true;
+    } else {
+      equippedArmor = {
+        base: data.armor_class.base,
+        dexBonus: !!data.armor_class.dex_bonus,
+        maxBonus: data.armor_class.max_bonus ?? undefined,
+      };
+    }
+  }
+  return {
+    ac: armorClassFor({
+      dexMod: abilityMod(opts.abilities.dex),
+      conMod: abilityMod(opts.abilities.con),
+      wisMod: abilityMod(opts.abilities.wis),
+      classIndex: opts.classIndex,
+      equippedArmor,
+      hasShield,
+    }),
+  };
+}
 
 export const create = mutation({
   args: {
@@ -208,8 +250,7 @@ export const create = mutation({
     // --- Auto-equip best armor + shield, derive AC ---------------------------
     const dexMod = abilityMod(abilities.dex);
     const conMod = abilityMod(abilities.con);
-    const wisMod = abilityMod(abilities.wis);
-    let bestArmor: { key: string; base: number; dexBonus: boolean; maxBonus?: number; ac: number } | null = null;
+    let bestArmor: { key: string; ac: number } | null = null;
     let shieldKey: string | null = null;
     for (const [key, item] of inventory) {
       if (!item.itemIndex) continue;
@@ -227,9 +268,6 @@ export const create = mutation({
       }
       const candidate = {
         key,
-        base: data.armor_class.base,
-        dexBonus: !!data.armor_class.dex_bonus,
-        maxBonus: data.armor_class.max_bonus ?? undefined,
         ac: data.armor_class.base + (data.armor_class.dex_bonus ? Math.min(dexMod, data.armor_class.max_bonus ?? 99) : 0),
       };
       if (!bestArmor || candidate.ac > bestArmor.ac) bestArmor = candidate;
@@ -237,13 +275,10 @@ export const create = mutation({
     if (bestArmor) inventory.get(bestArmor.key)!.equipped = true;
     if (shieldKey) inventory.get(shieldKey)!.equipped = true;
 
-    const ac = armorClassFor({
-      dexMod,
-      conMod,
-      wisMod,
+    const { ac } = await deriveArmorAndAc(ctx, {
       classIndex: args.classIndex,
-      equippedArmor: bestArmor,
-      hasShield: shieldKey !== null,
+      abilities,
+      inventory: [...inventory.values()],
     });
 
     let maxHp = cls.hit_die + conMod;
@@ -297,6 +332,92 @@ export const create = mutation({
     });
     await ctx.db.patch(player._id, { characterId });
     return { characterId };
+  },
+});
+
+// Custom (index-less) gear can still be wielded if it sounds like a weapon.
+const WEAPON_NAME_RE = /sword|dagger|axe|bow|mace|spear|staff|hammer|blade|knife/;
+
+// Equip slot for an item: SRD data decides when indexed, name keywords cover
+// custom gear. null = ordinary gear, not equippable.
+async function equipSlotFor(
+  ctx: QueryCtx,
+  item: { itemIndex?: string; name: string },
+): Promise<"armor" | "shield" | "weapon" | null> {
+  if (item.itemIndex) {
+    const doc = await ctx.db
+      .query("srd")
+      .withIndex("by_category_index", (q) =>
+        q.eq("category", "equipment").eq("index", item.itemIndex!),
+      )
+      .unique();
+    const data = doc?.data as any;
+    if (data?.armor_class) return data.armor_category === "Shield" ? "shield" : "armor";
+    if (data?.damage) return "weapon";
+    return null;
+  }
+  return WEAPON_NAME_RE.test(item.name.toLowerCase()) ? "weapon" : null;
+}
+
+async function requireOwnCharacter(ctx: MutationCtx, sessionToken: string) {
+  const player = await requirePlayer(ctx, sessionToken);
+  if (!player.characterId) throw new ConvexError({ code: "no_character" });
+  const character = await ctx.db.get(player.characterId);
+  if (!character) throw new ConvexError({ code: "no_character" });
+  return character;
+}
+
+// Equip/unequip one of your own items. One occupant per slot (armor, shield,
+// main-hand weapon) — equipping evicts the current holder. AC follows.
+export const setEquipped = mutation({
+  args: { sessionToken: v.string(), itemName: v.string(), equipped: v.boolean() },
+  handler: async (ctx, args) => {
+    const character = await requireOwnCharacter(ctx, args.sessionToken);
+    const inventory = character.inventory.map((i) => ({ ...i }));
+    const needle = args.itemName.trim().toLowerCase();
+    const target = inventory.find((i) => i.name.toLowerCase() === needle);
+    if (!target) throw new ConvexError({ code: "item_not_found" });
+
+    const slot = await equipSlotFor(ctx, target);
+    if (!slot) throw new ConvexError({ code: "not_equippable" });
+
+    if (args.equipped) {
+      for (const other of inventory) {
+        if (other === target || !other.equipped) continue;
+        if ((await equipSlotFor(ctx, other)) === slot) other.equipped = false;
+      }
+    }
+    target.equipped = args.equipped;
+
+    const { ac } = await deriveArmorAndAc(ctx, {
+      classIndex: character.classIndex,
+      abilities: character.abilities,
+      inventory,
+    });
+    await ctx.db.patch(character._id, { inventory, ac });
+    return { ac };
+  },
+});
+
+// Splice-move an item within your own pack (drag-to-reorder in the bag grid).
+// Name-addressed, not index-addressed: client snapshots go stale between
+// optimistic drags, and stale indexes would move the wrong item.
+export const reorderInventory = mutation({
+  args: { sessionToken: v.string(), movedName: v.string(), targetName: v.string() },
+  handler: async (ctx, args) => {
+    const character = await requireOwnCharacter(ctx, args.sessionToken);
+    const inventory = [...character.inventory];
+    const from = inventory.findIndex(
+      (i) => i.name.toLowerCase() === args.movedName.toLowerCase(),
+    );
+    const to = inventory.findIndex(
+      (i) => i.name.toLowerCase() === args.targetName.toLowerCase(),
+    );
+    if (from === -1 || to === -1) throw new ConvexError({ code: "item_not_found" });
+    const [moved] = inventory.splice(from, 1);
+    inventory.splice(to, 0, moved);
+    await ctx.db.patch(character._id, { inventory });
+    return null;
   },
 });
 
