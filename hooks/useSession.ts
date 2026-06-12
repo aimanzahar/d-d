@@ -12,7 +12,7 @@ export type Session = {
   campaignId: Id<"campaigns">;
   inviteCode: string;
   campaignName: string;
-  campaignStatus: "lobby" | "active";
+  campaignStatus: "lobby" | "active" | "ended";
 };
 
 export const SessionContext = createContext<Session | null>(null);

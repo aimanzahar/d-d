@@ -13,23 +13,27 @@ import type { DiceEvent } from "@/stores/gameStore";
 import { PhysicalDie } from "./PhysicalDie";
 
 const LINGER_MS = 1300; // pause on the settled pile before onDone
+const HURRY_LINGER_MS = 450; // when more rolls are queued behind this one
 const SAFETY_MS = 8000; // absolute ceiling — onDone always fires
 
 type DiceOverlayProps = {
   event: DiceEvent;
+  hurry?: boolean; // a backlog is waiting — shorten the linger
   onSettled?: () => void;
   onDone: () => void;
 };
 
 type DieSpec = { sides: number; value: number; dimmed: boolean };
 
-export default function DiceOverlay({ event, onSettled, onDone }: DiceOverlayProps) {
+export default function DiceOverlay({ event, hurry, onSettled, onDone }: DiceOverlayProps) {
   const onDoneRef = useRef(onDone);
   const onSettledRef = useRef(onSettled);
+  const hurryRef = useRef(hurry);
   useEffect(() => {
     onDoneRef.current = onDone;
     onSettledRef.current = onSettled;
-  }, [onDone, onSettled]);
+    hurryRef.current = hurry;
+  }, [onDone, onSettled, hurry]);
 
   const dice = useMemo<DieSpec[]>(
     () =>
@@ -54,7 +58,7 @@ export default function DiceOverlay({ event, onSettled, onDone }: DiceOverlayPro
     settledCount.current += 1;
     if (settledCount.current >= dice.length && lingerTimer.current === null) {
       onSettledRef.current?.();
-      lingerTimer.current = setTimeout(fireDone, LINGER_MS);
+      lingerTimer.current = setTimeout(fireDone, hurryRef.current ? HURRY_LINGER_MS : LINGER_MS);
     }
   }, [dice.length, fireDone]);
 

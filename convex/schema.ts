@@ -53,7 +53,8 @@ export default defineSchema({
   campaigns: defineTable({
     name: v.string(),
     inviteCode: v.string(), // 6-char A-Z0-9, crypto-random
-    status: v.union(v.literal("lobby"), v.literal("active")),
+    // "ended": the story concluded (e.g. total party kill) — read-only history
+    status: v.union(v.literal("lobby"), v.literal("active"), v.literal("ended")),
     mode: v.union(v.literal("exploration"), v.literal("combat")),
     location: v.object({
       name: v.string(),

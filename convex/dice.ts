@@ -4,6 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { requirePlayer } from "./lib/auth";
 import { advanceAndSignal } from "./combat";
+import { checkPartyWipe } from "./characterOps";
 import { rollD20, rollNotation } from "./lib/dice";
 import { abilityMod, profBonus, type AbilityKey } from "./lib/rules5e";
 import { SKILL_TO_ABILITY } from "./srd/static";
@@ -92,6 +93,9 @@ export async function fulfillCore(
         note = " — three failures. They are gone.";
       }
       await ctx.db.patch(character._id, { deathSaves, conditions });
+      if (conditions.some((c) => c.name === "dead")) {
+        await checkPartyWipe(ctx, roll.campaignId);
+      }
     }
     await ctx.db.insert("messages", {
       campaignId: roll.campaignId,
@@ -335,7 +339,7 @@ export const recentRolls = query({
         q.eq("campaignId", args.campaignId).eq("status", "rolled"),
       )
       .order("desc")
-      .take(6);
+      .take(24); // combat bursts (multi-attack rounds) can outrun a small window
     return rolls
       .filter((r) => r.visibility === "public" && r.dice)
       .map((r) => ({

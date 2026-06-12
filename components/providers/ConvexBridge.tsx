@@ -104,6 +104,7 @@ export function ConvexBridge() {
             dice: r.dice,
             total: r.total,
             crit: r.crit,
+            at: r.at,
           })),
       );
     }

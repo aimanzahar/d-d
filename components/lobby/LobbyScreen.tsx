@@ -53,8 +53,9 @@ export function LobbyScreen() {
   const [starting, setStarting] = useState(false);
 
   // Everyone follows the host into the game when the campaign goes live
+  // (ended campaigns forward too — the play screen is the readable history)
   useEffect(() => {
-    if (session.campaignStatus === "active") {
+    if (session.campaignStatus !== "lobby") {
       router.replace(`/c/${session.inviteCode}/play`);
     }
   }, [session.campaignStatus, router, session.inviteCode]);

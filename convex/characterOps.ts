@@ -3,6 +3,7 @@
 // LLM can never write raw state.
 
 import { ConvexError, v } from "convex/values";
+import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -96,6 +97,7 @@ export async function applyHpDeltaCore(
   }
 
   await ctx.db.patch(character._id, { currentHp: hp, tempHp, conditions, deathSaves });
+  if (status === "dead") await checkPartyWipe(ctx, character.campaignId);
   return { hpBefore, hpAfter: hp, tempAbsorbed, status };
 }
 
@@ -105,6 +107,39 @@ function upsertCondition(
 ): Doc<"characters">["conditions"] {
   if (conditions.some((c) => c.name === name)) return conditions;
   return [...conditions, { name }];
+}
+
+// Called after any transition onto the "dead" condition: when no living PC
+// remains, the story is over — seal the campaign. The GM can no longer be
+// woken (enqueueGm requires status "active") and the input locks, but every
+// player keeps read access to the history.
+export async function checkPartyWipe(ctx: MutationCtx, campaignId: Id<"campaigns">) {
+  const campaign = await ctx.db.get(campaignId);
+  if (!campaign || campaign.status !== "active") return;
+  const characters = await ctx.db
+    .query("characters")
+    .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+    .collect();
+  if (characters.length === 0) return;
+  if (characters.some((c) => !c.conditions.some((x) => x.name === "dead"))) return;
+  await ctx.db.patch(campaignId, { status: "ended" });
+  await ctx.db.insert("messages", {
+    campaignId,
+    kind: "system",
+    content:
+      "☠ The whole party has fallen. The tale ends here — this campaign is closed, but its story remains for the reading.",
+    status: "complete",
+    ooc: false,
+    processed: true,
+  });
+  if (campaign.activeCombatId) {
+    // Scheduled to avoid a combat.ts import cycle; tolerates "no active combat"
+    await ctx.scheduler.runAfter(0, internal.combat.toolEndCombat, {
+      campaignId,
+      outcome: "defeat",
+      summary: "The whole party has fallen.",
+    });
+  }
 }
 
 export const applyHpDelta = internalMutation({
@@ -135,6 +170,9 @@ export const setCondition = internalMutation({
       conditions = [...conditions, { name: args.condition, expiresRound: args.durationRounds }];
     }
     await ctx.db.patch(args.characterId, { conditions });
+    if (args.condition === "dead" && args.action === "add") {
+      await checkPartyWipe(ctx, character.campaignId);
+    }
     return { ok: true, conditions: conditions.map((c) => c.name) };
   },
 });

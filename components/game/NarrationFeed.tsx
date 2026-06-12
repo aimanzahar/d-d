@@ -18,12 +18,15 @@ export function NarrationFeed() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
-  // Rolls whose 3D dice are still tumbling on screen — their chips are held
-  // back so the result never spoils the animation. Historical rolls are never
-  // enqueued (ConvexBridge only animates rolls landing after mount), so old
-  // chips render immediately.
-  const diceQueue = useGameStore((s) => s.diceQueue);
-  const rollingIds = useMemo(() => new Set(diceQueue.map((e) => e.rollId)), [diceQueue]);
+  // While dice are tumbling, everything written after the currently-animating
+  // roll stays hidden — chips, damage lines, follow-up narration — so a burst
+  // of rolls (a monster's full round) reveals beat by beat as each animation
+  // lands. Historical rolls are never enqueued (ConvexBridge only animates
+  // rolls landing after mount), so old messages render immediately.
+  const diceHead = useGameStore((s) => (s.diceQueue.length > 0 ? s.diceQueue[0] : null));
+  // 250ms of slack: the roll row and its message are written in one mutation,
+  // but rolledAt (Date.now in the handler) and _creationTime can differ a hair.
+  const gateTime = diceHead ? diceHead.at - 250 : Infinity;
 
   // Dictionary for GM name highlighting: party names, the current location,
   // and anything the GM has ever **bolded**. Both queries are already live
@@ -64,11 +67,10 @@ export function NarrationFeed() {
 
   const lastContent = results[0]?.content;
   const count = results.length;
-  const rollingCount = rollingIds.size; // re-pin when a held-back chip pops in
   useEffect(() => {
     const el = scrollRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [lastContent, count, rollingCount]);
+  }, [lastContent, count, gateTime]); // gateTime: re-pin as held-back messages pop in
 
   // Stay pinned to the newest line when the panel is drag-resized smaller
   useEffect(() => {
@@ -95,6 +97,8 @@ export function NarrationFeed() {
         </p>
       )}
       {chronological.map((m) => {
+        // Held back until the dice animation playback catches up to it
+        if (m._creationTime >= gateTime) return null;
         switch (m.kind) {
           case "gm":
             // Ghost rows: a completed message with no real content would
@@ -118,8 +122,6 @@ export function NarrationFeed() {
               </div>
             );
           case "roll":
-            // Held back until the dice animation for this roll completes
-            if (m.rollId && rollingIds.has(String(m.rollId))) return null;
             return (
               <div key={m._id} className="flex justify-center">
                 {m.roll ? (

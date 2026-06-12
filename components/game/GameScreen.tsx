@@ -19,7 +19,7 @@ import { BattleMap3D } from "@/components/three/battle";
 
 // Owns the resize state so pointer-rate drag updates re-render only the
 // panel, never the canvas/header/sidebar subtrees.
-function ResizableChatPanel({ gmThinking }: { gmThinking: boolean }) {
+function ResizableChatPanel({ gmThinking, ended }: { gmThinking: boolean; ended: boolean }) {
   const { panelHeight, gripProps } = usePanelHeight();
   return (
     <div className="pointer-events-auto mx-3 mb-3 panel-notch">
@@ -39,7 +39,13 @@ function ResizableChatPanel({ gmThinking }: { gmThinking: boolean }) {
           <div className="w-12 h-1 rounded-full bg-gold-dim/50 hover:bg-gold-dim transition-colors" />
         </div>
         <NarrationFeed />
-        <ActionInput gmThinking={gmThinking} />
+        {ended ? (
+          <p className="px-5 py-4 text-center font-narrative italic text-sm text-parchment-faint border-t border-gold-dim/20">
+            ☠ This tale has ended. The pages above are all that remain.
+          </p>
+        ) : (
+          <ActionInput gmThinking={gmThinking} />
+        )}
       </div>
     </div>
   );
@@ -104,7 +110,10 @@ export function GameScreen() {
             {/* transparent battlefield window — clicks reach the canvas */}
             <div className="flex-1 min-h-[120px]" />
 
-            <ResizableChatPanel gmThinking={campaign.gmStatus === "running"} />
+            <ResizableChatPanel
+              gmThinking={campaign.gmStatus === "running"}
+              ended={campaign.status === "ended"}
+            />
           </main>
         </div>
       </div>

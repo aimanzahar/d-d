@@ -81,10 +81,16 @@ export function MyCampaigns() {
                   className={`font-display text-[0.55rem] tracking-[0.2em] uppercase border px-1.5 py-0.5 ${
                     row.campaignStatus === "active"
                       ? "text-vitality border-vitality/40"
-                      : "text-gold-dim border-gold-dim/40"
+                      : row.campaignStatus === "ended"
+                        ? "text-blood/80 border-blood/40"
+                        : "text-gold-dim border-gold-dim/40"
                   }`}
                 >
-                  {row.campaignStatus === "active" ? "At the table" : "Gathering"}
+                  {row.campaignStatus === "active"
+                    ? "At the table"
+                    : row.campaignStatus === "ended"
+                      ? "Tale ended"
+                      : "Gathering"}
                 </span>
                 {row.isHost && (
                   <span className="font-display text-[0.55rem] tracking-[0.2em] uppercase border border-gold/40 text-gold px-1.5 py-0.5">

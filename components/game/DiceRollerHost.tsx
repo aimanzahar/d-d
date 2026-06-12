@@ -17,6 +17,7 @@ const FADE_MS = 900;
 
 export function DiceRollerHost() {
   const current = useGameStore((s) => (s.diceQueue.length > 0 ? s.diceQueue[0] : null));
+  const hurry = useGameStore((s) => s.diceQueue.length > 1); // backlog: play faster
   const dequeueDice = useGameStore((s) => s.dequeueDice);
 
   const [revealed, setRevealed] = useState(false);
@@ -47,7 +48,8 @@ export function DiceRollerHost() {
     };
     const el = wrapRef.current;
     if (el) {
-      animate(el, { opacity: [1, 0], duration: FADE_MS, ease: "inOut(2)", onComplete: finish });
+      const fade = useGameStore.getState().diceQueue.length > 1 ? 300 : FADE_MS;
+      animate(el, { opacity: [1, 0], duration: fade, ease: "inOut(2)", onComplete: finish });
     } else {
       finish();
     }
@@ -69,7 +71,7 @@ export function DiceRollerHost() {
   return (
     // Keyed by rollId so back-to-back events remount with fresh opacity.
     <div ref={wrapRef} key={current.rollId}>
-      <DiceOverlay event={current} onSettled={handleSettled} onDone={handleDone} />
+      <DiceOverlay event={current} hurry={hurry} onSettled={handleSettled} onDone={handleDone} />
       <div className="fixed bottom-24 inset-x-0 z-50 pointer-events-none flex justify-center">
         <div className="flex flex-col items-center gap-1 rounded border border-gold/30 bg-ink/85 px-8 py-4 backdrop-blur-sm">
           <p className="font-display text-xs uppercase tracking-[0.2em] text-gold">

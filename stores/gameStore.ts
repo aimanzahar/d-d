@@ -14,6 +14,7 @@ export type DiceEvent = {
   dice: { sides: number; count: number; results: number[]; dropped: number[] }[];
   total: number;
   crit?: "hit" | "miss";
+  at: number; // server rolledAt — the feed hides anything written after this until the dice land
 };
 
 export type TokenView = {
