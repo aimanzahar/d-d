@@ -44,7 +44,9 @@ export const create = mutation({
       status: "lobby",
       mode: "exploration",
       location: {
-        name: "The Gathering",
+        // Placeholder only — the GM invents the real, unique opening location on
+        // its first turn (see startAdventure's kickoff directive).
+        name: "An unnamed waypoint",
         description: "Adventurers assemble before the journey begins.",
         sceneType: "tavern",
       },
@@ -177,12 +179,16 @@ export const startAdventure = mutation({
       campaignId: args.campaignId,
       kind: "system",
       content:
-        "The campaign begins NOW. Open the adventure: establish the starting location with change_location, set the scene vividly from the premise, introduce each party member as present, and end with a hook that demands a decision.",
+        "The campaign begins NOW. Open the adventure: INVENT a unique, evocative name for the starting location that fits the premise (the current location is an unnamed placeholder — never call it 'The Gathering' or reuse a generic name), call change_location to establish it, set the scene vividly from the premise, introduce each party member as present, and end with a hook that demands a decision.",
       status: "complete",
       ooc: true,
       processed: false,
     });
     await enqueueGm(ctx, args.campaignId);
+    // Auto-chart the region map so the host never has to click "Chart this region".
+    await ctx.scheduler.runAfter(0, internal.regionMap.kickoffRegionMap, {
+      campaignId: args.campaignId,
+    });
   },
 });
 

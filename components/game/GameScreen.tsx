@@ -8,9 +8,11 @@ import { withBasePath } from "@/lib/basePath";
 import { usePanelHeight } from "@/hooks/usePanelHeight";
 import { useSession } from "@/hooks/useSession";
 import { useGameStore } from "@/stores/gameStore";
+import { useAudioStore } from "@/stores/audioStore";
 import { ActionInput } from "./ActionInput";
 import { CombatHUD } from "@/components/combat/CombatHUD";
 import { DiceRollerHost } from "./DiceRollerHost";
+import { NarrationAudio } from "./NarrationAudio";
 import { NarrationFeed } from "./NarrationFeed";
 import { PartySidebar } from "./PartySidebar";
 import { RollPrompt } from "./RollPrompt";
@@ -58,6 +60,8 @@ export function GameScreen() {
   // Store mode, not the live query: ConvexBridge defers it while dice play,
   // so the combat HUD doesn't vanish ahead of the final blow's animation.
   const storeMode = useGameStore((s) => s.mode);
+  const narrationEnabled = useAudioStore((s) => s.narrationEnabled);
+  const setNarrationEnabled = useAudioStore((s) => s.setNarrationEnabled);
   const campaign = useQuery(api.campaigns.get, {
     sessionToken: session.sessionToken,
     inviteCode: session.inviteCode,
@@ -74,6 +78,7 @@ export function GameScreen() {
   return (
     <div className="relative h-dvh overflow-hidden">
       <ConvexBridge />
+      <NarrationAudio />
 
       {/* The living world: ambient scene + tactical battlefield (z-0) */}
       <StageCanvasLazy>
@@ -95,6 +100,17 @@ export function GameScreen() {
           <p className="font-narrative italic text-sm text-parchment-dim truncate flex-1">
             {campaign.location.name}
           </p>
+          <button
+            onClick={() => setNarrationEnabled(!narrationEnabled)}
+            title={narrationEnabled ? "Mute narration" : "Unmute narration"}
+            aria-label={narrationEnabled ? "Mute narration" : "Unmute narration"}
+            aria-pressed={narrationEnabled}
+            className={`shrink-0 cursor-pointer text-base leading-none transition-colors ${
+              narrationEnabled ? "text-gold hover:text-gold-bright" : "text-parchment-faint hover:text-parchment"
+            }`}
+          >
+            {narrationEnabled ? "🔊" : "🔇"}
+          </button>
           <span className="font-dice text-[0.65rem] tracking-[0.3em] text-parchment-faint">
             {session.inviteCode}
           </span>

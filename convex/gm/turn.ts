@@ -280,6 +280,15 @@ export const respond = internalAction({
         });
       }
 
+      // Fire-and-forget narration TTS — only when real prose streamed (skip
+      // silent dice-waits). Non-blocking; failure just drops the audio.
+      if (gmMessageId !== null && streamedChars > 0) {
+        await ctx.scheduler.runAfter(0, internal.gm.tts.synthesize, {
+          campaignId: args.campaignId,
+          gmMessageId,
+        });
+      }
+
       const next = await ctx.runMutation(internal.gm.turn.finishTurn, args);
       if (next.continue) {
         await ctx.scheduler.runAfter(0, internal.gm.turn.respond, {

@@ -49,6 +49,8 @@ export const list = query({
         const roll = m.rollId ? await ctx.db.get(m.rollId) : null;
         const image = m.imageId ? await ctx.db.get(m.imageId) : null;
         const rawUrl = image?.storageId ? await ctx.storage.getUrl(image.storageId) : null;
+        // Spoken-narration audio (gm messages): resolve to the public proxy URL.
+        const rawAudioUrl = m.audioStorageId ? await ctx.storage.getUrl(m.audioStorageId) : null;
         return {
           ...m,
           roll:
@@ -56,10 +58,38 @@ export const list = query({
               ? { ...roll, dc: roll.status === "rolled" ? roll.dc : undefined }
               : null,
           imageUrl: rawUrl ? publicStorageUrl(rawUrl) : null,
+          audioUrl: rawAudioUrl ? publicStorageUrl(rawAudioUrl) : null,
         };
       }),
     );
     return { ...page, page: items };
+  },
+});
+
+// Lightweight feed for the narration audio player: the most recent GM messages
+// that have synthesized audio, newest-first. The player watermarks at mount and
+// only voices messages that arrive afterward.
+export const narrationAudio = query({
+  args: { sessionToken: v.string(), campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    await requirePlayer(ctx, args.sessionToken, args.campaignId);
+    const recent = await ctx.db
+      .query("messages")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .order("desc")
+      .take(25);
+    const narrated = recent.filter((m) => m.kind === "gm" && m.audioStorageId);
+    return Promise.all(
+      narrated.map(async (m) => {
+        const raw = m.audioStorageId ? await ctx.storage.getUrl(m.audioStorageId) : null;
+        return {
+          id: String(m._id),
+          createdAt: m._creationTime,
+          audioStatus: m.audioStatus ?? null,
+          audioUrl: raw ? publicStorageUrl(raw) : null,
+        };
+      }),
+    );
   },
 });
 

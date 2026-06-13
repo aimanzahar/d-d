@@ -280,6 +280,11 @@ export default defineSchema({
     rollId: v.optional(v.id("rolls")),
     imageId: v.optional(v.id("images")),
     round: v.optional(v.number()), // combat round tag
+    // Spoken narration (TTS): gm messages get audio synthesized post-finalize.
+    audioStatus: v.optional(
+      v.union(v.literal("generating"), v.literal("done"), v.literal("failed")),
+    ),
+    audioStorageId: v.optional(v.id("_storage")),
   })
     .index("by_campaign", ["campaignId"])
     .index("by_campaign_unprocessed", ["campaignId", "processed"]),
