@@ -259,6 +259,11 @@ export const respond = internalAction({
         await ctx.runMutation(internal.combat.autoAdvanceIfMonsterStuck, {
           campaignId: args.campaignId,
         });
+        // Player side: if the active PC committed their action and the GM has
+        // finished resolving it, advance the turn so a typed action ends the turn.
+        await ctx.runMutation(internal.combat.autoAdvanceIfPlayerActionDone, {
+          campaignId: args.campaignId,
+        });
         // Pacing safety net: count quiet exploration turns; the mutation self-
         // guards on mode/progress and fires a one-shot complication directive at
         // the threshold so a dithering scene never grinds in place.

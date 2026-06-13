@@ -71,6 +71,52 @@ export const listClasses = query({
   },
 });
 
+// Most weapons/armor carry no `desc` (only ~109/237 equipment records do), so
+// synthesize a one-line description from their structured fields when absent.
+function synthDescription(d: any): string {
+  if (Array.isArray(d.desc) && d.desc.length) return d.desc.join(" ");
+  const parts: string[] = [];
+  if (d.damage?.damage_dice) {
+    parts.push(`${d.damage.damage_dice} ${d.damage.damage_type?.name ?? ""} damage`.trim());
+  }
+  if (d.weapon_category) parts.push(`${d.weapon_category} weapon`);
+  if (d.range && (d.range.normal || d.range.long)) {
+    parts.push(`range ${d.range.normal}${d.range.long ? `/${d.range.long}` : ""} ft`);
+  }
+  if (Array.isArray(d.properties) && d.properties.length) {
+    parts.push(d.properties.map((p: any) => p.name).join(", "));
+  }
+  if (d.armor_class?.base != null) {
+    const dex = d.armor_class.dex_bonus
+      ? ` + Dex${d.armor_class.max_bonus != null ? ` (max ${d.armor_class.max_bonus})` : ""}`
+      : "";
+    parts.push(`AC ${d.armor_class.base}${dex}`);
+  }
+  if (d.armor_category) parts.push(`${d.armor_category} armor`);
+  if (d.str_minimum) parts.push(`requires STR ${d.str_minimum}`);
+  if (d.stealth_disadvantage) parts.push("disadvantage on Stealth");
+  if (d.cost?.quantity != null) parts.push(`${d.cost.quantity} ${d.cost.unit}`);
+  if (d.weight) parts.push(`${d.weight} lb`);
+  if (!parts.length && d.equipment_category?.name) parts.push(d.equipment_category.name);
+  return parts.join(" · ") || "No description available.";
+}
+
+// Lazily-fetched detail for a single equipment item, for the creation hover
+// popover. Returns null for unknown/custom indexes so the caller shows the name only.
+export const itemDetail = query({
+  args: { index: v.string() },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db
+      .query("srd")
+      .withIndex("by_category_index", (q) =>
+        q.eq("category", "equipment").eq("index", args.index),
+      )
+      .unique();
+    if (!doc) return null;
+    return { index: doc.index, name: doc.name, description: synthDescription(doc.data as any) };
+  },
+});
+
 // Loads trait records for a race + subrace (missing trait docs are skipped).
 export async function loadTraits(ctx: QueryCtx, race: any, subrace: any | null) {
   const refs: any[] = [...(race.traits ?? []), ...(subrace?.racial_traits ?? [])];
@@ -174,7 +220,16 @@ export const creationData = query({
           ...(race.ability_bonuses as any[]),
           ...((subrace?.ability_bonuses as any[]) ?? []),
         ].map((b: any) => ({ ability: b.ability_score.index, bonus: b.bonus })),
-        languages: (race.languages as any[]).map((l: any) => l.name),
+        languages: [
+          ...(race.languages as any[]),
+          ...((subrace?.languages as any[]) ?? []),
+        ].map((l: any) => l.name),
+        // Language indexes already known from race + subrace, so the language
+        // pickers can grey out duplicates (client-side; server re-checks).
+        knownLanguageIndexes: [
+          ...(race.languages as any[]),
+          ...((subrace?.languages as any[]) ?? []),
+        ].map((l: any) => l.index),
         classProficiencies: (cls.proficiencies as any[]).map((p: any) => p.name),
         traitNames: traits.map((t: any) => t.name),
         spellAbility: cls.spellcasting?.spellcasting_ability.index ?? null,

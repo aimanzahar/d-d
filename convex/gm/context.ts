@@ -5,6 +5,7 @@ import { v } from "convex/values";
 import { internalQuery } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
 import { abilityMod, profBonus, type AbilityKey } from "../lib/rules5e";
+import { FEATS } from "../srd/feats";
 
 const ABILS: AbilityKey[] = ["str", "dex", "con", "int", "wis", "cha"];
 
@@ -27,11 +28,15 @@ export function condensedCharacter(c: Doc<"characters">): string {
     .slice(0, 25)
     .map((i) => `${i.name}${i.quantity > 1 ? `×${i.quantity}` : ""}`)
     .join(", ");
+  // Feats — so the GM honors ones the engine only approximates or doesn't
+  // enforce (Grappler, War Caster, Lucky, Alert).
+  const feats = (c.feats ?? []).map((f) => FEATS[f.index]?.name ?? f.index).join(", ");
   return [
     `${c.name} (${c.raceIndex} ${c.classIndex} ${c.level})`,
     `  HP ${c.currentHp}/${c.maxHp}${c.tempHp ? ` (+${c.tempHp} temp)` : ""} | AC ${c.ac} | speed ${c.speed}ft | passive Perception ${passivePerception} | prof +${profBonus(c.level)}`,
     `  ${mods} | saves: ${c.proficiencies.savingThrows.map((s) => s.toUpperCase()).join(", ")}`,
     `  skills: ${c.proficiencies.skills.join(", ") || "—"} | slots: ${slots} | conditions: ${conditions}`,
+    ...(feats ? [`  feats: ${feats}`] : []),
     `  gear: ${gear} | ${c.currency.gp} gp${c.notes ? ` | backstory: ${c.notes.slice(0, 600)}` : ""}`,
   ].join("\n");
 }

@@ -3,6 +3,7 @@
 import { createPortal } from "react-dom";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { Panel } from "@/components/ui/Panel";
+import { renderInlineMarkdown } from "@/lib/markdown";
 
 const KIND_LABEL: Record<string, string> = {
   settlement: "Settlement",
@@ -70,7 +71,7 @@ export function PoiDetail({
               )}
             </div>
             <p className="font-narrative text-[0.85rem] text-parchment leading-relaxed whitespace-pre-wrap">
-              {poi.description}
+              {renderInlineMarkdown(poi.description)}
             </p>
             {faction && (
               <div className="pt-1.5 border-t border-gold-dim/20">

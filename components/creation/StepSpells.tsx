@@ -3,15 +3,14 @@
 import { abilityMod, type AbilityKey } from "@/lib/abilities";
 import type { CreationData, Draft } from "./types";
 import { Panel } from "@/components/ui/Panel";
+import { finalAbilityScores } from "./derive";
 
 // How many level-1 spells this draft must pick (mirrors server logic).
 export function expectedSpellCount(data: CreationData, draft: Draft): number {
   const plan = data.spellPlan!;
   if (plan.count !== null) return plan.count;
   const ability = data.summary.spellAbility as AbilityKey;
-  let score = draft.baseScores[ability];
-  for (const b of data.summary.fixedBonuses) if (b.ability === ability) score += b.bonus;
-  for (const p of draft.submission["race.abil"] ?? []) if (p.key === ability) score += 1;
+  const score = finalAbilityScores(data, draft.baseScores, draft.submission)[ability];
   return Math.max(1, abilityMod(score) + 1);
 }
 

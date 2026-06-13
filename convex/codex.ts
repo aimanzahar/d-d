@@ -4,6 +4,7 @@
 import { v } from "convex/values";
 import { internalMutation, query } from "./_generated/server";
 import { requirePlayer } from "./lib/auth";
+import { fallbackCoord } from "./lib/mapCoords";
 
 const POI_KINDS = ["settlement", "dungeon", "landmark", "wilds", "danger", "quest_site"] as const;
 const STANDINGS = ["allied", "friendly", "neutral", "unfriendly", "hostile", "unknown"] as const;
@@ -34,19 +35,24 @@ export const upsertPoi = internalMutation({
         q.eq("campaignId", args.campaignId).eq("slug", args.slug),
       )
       .unique();
+    // Coords: use the GM's when supplied; keep prior coords on update; otherwise
+    // assign a deterministic fallback so every POI always has a place on the map.
+    const gmCoords =
+      args.x !== undefined && args.y !== undefined ? { x: args.x, y: args.y } : null;
     if (existing) {
+      const coords =
+        gmCoords ?? (existing.x == null || existing.y == null ? fallbackCoord(args.slug) : {});
       await ctx.db.patch(existing._id, {
         name: args.name.slice(0, 80),
         kind,
         description: args.description.slice(0, 600),
         factionSlug: args.factionSlug,
-        // Keep prior coords when the GM omits them this time.
-        ...(args.x !== undefined ? { x: args.x } : {}),
-        ...(args.y !== undefined ? { y: args.y } : {}),
+        ...coords,
         discovered: args.discovered,
         updatedAt: Date.now(),
       });
     } else {
+      const coords = gmCoords ?? fallbackCoord(args.slug);
       await ctx.db.insert("pois", {
         campaignId: args.campaignId,
         slug: args.slug,
@@ -54,8 +60,8 @@ export const upsertPoi = internalMutation({
         kind,
         description: args.description.slice(0, 600),
         factionSlug: args.factionSlug,
-        x: args.x,
-        y: args.y,
+        x: coords.x,
+        y: coords.y,
         discovered: args.discovered,
         isCurrent: false,
         updatedAt: Date.now(),

@@ -3,6 +3,7 @@ import { internalAction, internalMutation, internalQuery } from "./_generated/se
 import { internal } from "./_generated/api";
 import { embed } from "./lib/llm";
 import { ensureCollection, deleteByFilter, upsertPoints } from "./lib/qdrant";
+import { VARIANT_RECORDS } from "./srd/variants";
 
 const RAW = "https://raw.githubusercontent.com/5e-bits/5e-database/main/src/2014/en";
 
@@ -108,6 +109,28 @@ export const upsertSrdBatch = internalMutation({
         await ctx.db.insert("srd", rec);
       }
     }
+  },
+});
+
+// Seeds the curated non-SRD variant races/subraces + their traits (Drow,
+// Variant Human, Custom Lineage). Idempotent (distinct indexes, upsert by
+// category+index) and additive — run AFTER runSrdSeed so the base races exist.
+// Never wipe the whole srd table or these are lost (see ADR 0002).
+//   npx convex run seed:seedVariants
+export const seedVariants = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    for (const rec of VARIANT_RECORDS) {
+      const existing = await ctx.db
+        .query("srd")
+        .withIndex("by_category_index", (q) =>
+          q.eq("category", rec.category).eq("index", rec.index),
+        )
+        .unique();
+      if (existing) await ctx.db.patch(existing._id, rec);
+      else await ctx.db.insert("srd", rec);
+    }
+    return { seeded: VARIANT_RECORDS.length };
   },
 });
 

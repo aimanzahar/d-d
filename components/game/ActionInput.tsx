@@ -37,9 +37,12 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
   const inCombat = campaign?.mode === "combat";
   const active = combat?.initiative[combat.activeIndex];
   const notMyTurn = inCombat && !!combat && active?.refId !== String(session.characterId);
-  // When down or off-turn, the composer is locked to table talk (the server
-  // coerces it too — this just makes the UI honest about it).
-  const forcedOoc = incapacitated || notMyTurn;
+  // On your turn, once you've taken your one action (typed OR via a HUD button),
+  // the composer locks to table talk until the turn ends — mirrors the server gate.
+  const actionTaken = inCombat && !!combat && !notMyTurn && combat.turnState.actionUsed;
+  // When down, off-turn, or already acted, the composer is locked to table talk
+  // (the server coerces it too — this just makes the UI honest about it).
+  const forcedOoc = incapacitated || notMyTurn || actionTaken;
   const effectiveOoc = forcedOoc || ooc;
 
   // Soft spotlight (exploration only) — a cue, never a block.
@@ -140,7 +143,9 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
         <p className="font-narrative italic text-xs text-blood/90 mb-2">
           {incapacitated
             ? "Your hero has fallen — you can only speak to the table."
-            : "It's not your turn — only table talk reaches the others now."}
+            : actionTaken
+              ? "Your action is committed — your turn is resolving."
+              : "It's not your turn — only table talk reaches the others now."}
         </p>
       )}
       {showSpotlightHint && (
@@ -190,7 +195,9 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
                 forcedOoc
                   ? incapacitated
                     ? "Your hero is down — table talk only"
-                    : "Wait for your turn — table talk only"
+                    : actionTaken
+                      ? "You've taken your action — table talk only until your turn ends"
+                      : "Wait for your turn — table talk only"
                   : "Table talk doesn't trigger the GM"
               }
             >

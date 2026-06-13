@@ -5,16 +5,22 @@
 // shape. The client renders nodes; the server re-resolves and validates the
 // submission against the same nodes (no trusting the client).
 
+import { FEAT_LIST } from "./feats";
 import { LANGUAGES } from "./static";
 
 export type GrantedItem = { index: string; name: string; count: number };
 export type CategorySlot = { category: string; categoryName: string; choose: number };
+
+// An ability-score prerequisite carried to the client for live gating (feats).
+export type ChoicePrereq = { ability?: string; minScore: number };
 
 export type ChoiceOption = {
   key: string;
   label: string;
   grants: GrantedItem[];
   categorySlots: CategorySlot[];
+  prereq?: ChoicePrereq; // feat options only
+  desc?: string; // feat options only (1-line flavor for the card)
 };
 
 export type ChoiceKind =
@@ -23,7 +29,8 @@ export type ChoiceKind =
   | "ability_bonus"
   | "equipment"
   | "spell"
-  | "subtrait";
+  | "subtrait"
+  | "feat";
 
 export type ChoiceNode = {
   id: string;
@@ -35,7 +42,8 @@ export type ChoiceNode = {
 
 // One selected option within a node; categoryPicks[i] holds the equipment
 // indexes chosen for option.categorySlots[i] (length must equal slot.choose).
-export type ChoicePick = { key: string; categoryPicks?: string[][] };
+// featChoice carries a feat's internal sub-pick (e.g. Resilient's ability).
+export type ChoicePick = { key: string; categoryPicks?: string[][]; featChoice?: string };
 export type Submission = Record<string, ChoicePick[]>;
 
 function cleanLabel(name: string): string {
@@ -170,8 +178,46 @@ export function buildChoiceNodes(opts: {
       parseChoice("race.abil", "ability_bonus", "Ability score increases", race.ability_bonus_options),
     );
   }
+  // Racial proficiency choices (variant human skill, dwarf/half-elf/half-orc) —
+  // previously dropped; emitting them here makes those picks selectable.
+  if (race.starting_proficiency_options) {
+    nodes.push(
+      parseChoice(
+        "race.prof",
+        "proficiency",
+        race.starting_proficiency_options.desc ?? "Skill proficiency",
+        race.starting_proficiency_options,
+      ),
+    );
+  }
   if (subrace?.language_options) {
     nodes.push(parseChoice("subrace.lang", "language", "Bonus language", subrace.language_options));
+  }
+
+  // Feat node: emitted when the race or subrace grants a level-1 feat (variant
+  // races). Each FEATS entry becomes a choose-1 option carrying its prereq, so
+  // the client can grey out feats the final ability scores don't meet.
+  if (race.grants_feat || subrace?.grants_feat) {
+    const castingAbility = cls.spellcasting?.spellcasting_ability?.index as string | undefined;
+    nodes.push({
+      id: "race.feat",
+      kind: "feat",
+      label: "Feat",
+      choose: 1,
+      options: FEAT_LIST.map((f) => ({
+        key: f.index,
+        label: f.name,
+        desc: f.desc,
+        grants: [],
+        categorySlots: [],
+        prereq: f.prereq
+          ? {
+              ability: f.prereq.kind === "spellcasting" ? castingAbility : f.prereq.ability,
+              minScore: f.prereq.minScore,
+            }
+          : undefined,
+      })),
+    });
   }
 
   for (const trait of traits) {

@@ -168,6 +168,7 @@ export default defineSchema({
     userId: v.optional(v.id("users")), // owning account; absent = unclaimed legacy seat
     lastSeenAt: v.number(),
     lastInspiredAt: v.optional(v.number()), // backstory-muse LLM-call cooldown
+    lastPortraitAt: v.optional(v.number()), // portrait-generation cooldown
   })
     .index("by_token", ["sessionToken"])
     .index("by_campaign", ["campaignId"])
@@ -237,7 +238,24 @@ export default defineSchema({
       pp: v.number(),
     }),
     featureChoices: v.any(), // resolved choice-DSL picks (fighting style, ...)
+    // Feats taken (currently only at creation, via a variant race). `choices`
+    // holds a feat's internal sub-pick, e.g. Resilient's chosen ability.
+    feats: v.optional(
+      v.array(v.object({ index: v.string(), choices: v.optional(v.any()) })),
+    ),
+    // Per-feat combat state (ADR 0005) — kept OUT of turnState. Per-turn flags
+    // store the round number they were used and self-expire vs combat.round.
+    combatResources: v.optional(
+      v.object({
+        luckPoints: v.number(),
+        savageUsedRound: v.optional(v.number()),
+        defensiveDuelistRound: v.optional(v.number()),
+        gwmActive: v.optional(v.boolean()),
+        sharpshooterActive: v.optional(v.boolean()),
+      }),
+    ),
     position: v.optional(v.object({ x: v.number(), y: v.number() })), // combat grid cell
+    portraitStorageId: v.optional(v.id("_storage")), // uploaded or AI-generated portrait
     notes: v.string(),
   })
     .index("by_campaign", ["campaignId"])

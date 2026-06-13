@@ -42,3 +42,7 @@ next-env.d.ts
 
 # local artifacts
 .playwright-mcp/
+.agents
+skills-lock.json
+docs/adr
+CONTEXT.md

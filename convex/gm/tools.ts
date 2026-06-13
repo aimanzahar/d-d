@@ -9,6 +9,7 @@ import type { ActionCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { findCharacterByName } from "../characterOps";
 import { embed, type ToolDef } from "../lib/llm";
+import { fallbackCoord } from "../lib/mapCoords";
 import { search } from "../lib/qdrant";
 
 const SCENE_TYPES = [
@@ -174,7 +175,7 @@ export const TOOL_DEFS: ToolDef[] = [
     function: {
       name: "record_poi",
       description:
-        "Record or update a point of interest the party has learned about — a town, dungeon, landmark, or danger. Upserts by slug; call again with the same slug to update (e.g. set discovered=true once they arrive). Pass x/y (0-1, 0,0 = top-left of the region map) ONLY if you can place it sensibly relative to other POIs; omit them and it stays an unplaced journal entry.",
+        "Record or update a point of interest the party has learned about — a town, dungeon, landmark, or danger. Upserts by slug; call again with the same slug to update (e.g. set discovered=true once they arrive). ALWAYS pass x/y (0-1, 0,0 = top-left of the region map), placed sensibly relative to other POIs, so it shows on the map.",
       parameters: {
         type: "object",
         properties: {
@@ -186,8 +187,8 @@ export const TOOL_DEFS: ToolDef[] = [
           },
           description: { type: "string", description: "1-3 sentences, player-facing" },
           factionSlug: { type: "string", description: "controlling faction's slug, optional" },
-          x: { type: "number", description: "0-1 horizontal map position, optional" },
-          y: { type: "number", description: "0-1 vertical map position, optional" },
+          x: { type: "number", description: "0-1 horizontal map position (0 = left edge)" },
+          y: { type: "number", description: "0-1 vertical map position (0 = top edge)" },
           discovered: { type: "boolean", description: "true once visited; default false (rumored)" },
         },
         required: ["slug", "name", "kind", "description"],
@@ -454,7 +455,12 @@ export const toolChangeLocation = internalMutation({
     for (const p of pois) {
       const isHere =
         (args.poiSlug ? p.slug === args.poiSlug : false) || p.name.trim().toLowerCase() === lowerName;
-      if (p.isCurrent !== isHere) await ctx.db.patch(p._id, { isCurrent: isHere });
+      // The current POI must always have coords, so the "you are here" pin renders.
+      if (isHere && (p.x == null || p.y == null)) {
+        await ctx.db.patch(p._id, { isCurrent: true, ...fallbackCoord(p.slug) });
+      } else if (p.isCurrent !== isHere) {
+        await ctx.db.patch(p._id, { isCurrent: isHere });
+      }
     }
     return { ok: true, location: args.name };
   },

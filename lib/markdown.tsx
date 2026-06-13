@@ -98,6 +98,14 @@ function highlightNames(text: string, regex: RegExp): ReactNode[] {
   return nodes;
 }
 
+// Inline-only markdown (**bold**/*italics*) for short, already-styled strings —
+// e.g. Codex location/quest/faction blurbs and POI descriptions, which the GM
+// writes with markers but which render inside their own <p> tags. Emits inline
+// nodes (no block <p>/<blockquote> wrappers) so they nest in the caller's element.
+export function renderInlineMarkdown(text: string): ReactNode[] {
+  return renderInline(text);
+}
+
 function renderInline(text: string, highlight?: RegExp): ReactNode[] {
   return parseInline(text).map((seg, i) => {
     if (seg.bold && seg.italic)

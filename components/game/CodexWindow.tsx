@@ -7,6 +7,7 @@ import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { useSession } from "@/hooks/useSession";
 import { Panel } from "@/components/ui/Panel";
+import { renderInlineMarkdown } from "@/lib/markdown";
 import { PoiDetail, standingClass } from "./PoiDetail";
 
 const KIND_ICON: Record<string, string> = {
@@ -41,7 +42,7 @@ function QuestRow({ quest, tone }: { quest: Doc<"quests">; tone: "active" | "don
     <li>
       <p className={`font-display text-[0.72rem] ${toneClass}`}>{quest.title}</p>
       <p className="font-narrative italic text-[0.72rem] text-parchment-dim leading-snug">
-        {quest.description}
+        {renderInlineMarkdown(quest.description)}
       </p>
     </li>
   );
@@ -101,7 +102,7 @@ export function CodexWindow({ onClose }: { onClose: () => void }) {
                   {codex.currentLocation.name}
                 </p>
                 <p className="font-narrative italic text-[0.78rem] text-parchment-dim leading-relaxed mt-0.5">
-                  {codex.currentLocation.description}
+                  {renderInlineMarkdown(codex.currentLocation.description)}
                 </p>
               </section>
             )}
@@ -144,7 +145,7 @@ export function CodexWindow({ onClose }: { onClose: () => void }) {
                           {f.name}
                         </p>
                         <p className="font-narrative italic text-[0.72rem] text-parchment-dim leading-snug">
-                          {f.description}
+                          {renderInlineMarkdown(f.description)}
                         </p>
                       </div>
                     </li>

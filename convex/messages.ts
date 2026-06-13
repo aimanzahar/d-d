@@ -91,12 +91,25 @@ export const sendPlayerAction = mutation({
       ooc = true;
     }
 
-    // Combat gate: only the active combatant's words are actions; everyone
-    // else is table talk (Phase 6 sets mode='combat').
+    // Combat gate: only the active combatant's words are actions, and only ONE
+    // action per turn. Off-turn words are table talk; a typed action spends the
+    // turn's single action (shared with the HUD buttons via turnState.actionUsed),
+    // and any further words that turn become table talk. The GM resolves the
+    // committed action and then advances the turn (see COMBAT_ADDENDUM +
+    // autoAdvanceIfPlayerActionDone). Movement and OOC stay unlimited.
     if (campaign.mode === "combat" && !ooc) {
       const combat = campaign.activeCombatId ? await ctx.db.get(campaign.activeCombatId) : null;
       const active = combat?.initiative[combat.activeIndex];
-      if (!active || active.refId !== String(player.characterId)) ooc = true;
+      if (!combat || !active || active.refId !== String(player.characterId)) {
+        ooc = true; // not your turn
+      } else if (combat.turnState.actionUsed) {
+        ooc = true; // already acted this turn
+      } else {
+        // This message IS your one action this turn — spend it.
+        await ctx.db.patch(combat._id, {
+          turnState: { ...combat.turnState, actionUsed: true },
+        });
+      }
     }
 
     await ctx.db.insert("messages", {

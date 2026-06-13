@@ -32,9 +32,16 @@ export function CombatHUD() {
   const simpleAction = useMutation(api.combat.useSimpleAction);
   const endTurn = useMutation(api.combat.endTurn);
   const skipTurn = useMutation(api.combat.hostSkipTurn);
+  const brace = useMutation(api.combat.braceDefensiveDuelist);
+  const spendLuck = useMutation(api.combat.spendLuck);
 
   const [mode, setMode] = useState<TargetMode>(null);
   const [spellIndex, setSpellIndex] = useState<string>("");
+  // Great Weapon Master / Sharpshooter -5/+10 toggle. A ref mirrors it so the
+  // battlefield attack handler (registered via setTargeting) reads the live value.
+  const [powerAttack, setPowerAttack] = useState(false);
+  const powerRef = useRef(powerAttack);
+  powerRef.current = powerAttack;
   const [error, setError] = useState<string | null>(null);
   const bannerRef = useRef<HTMLDivElement>(null);
   const lastActive = useRef<string>("");
@@ -42,6 +49,12 @@ export function CombatHUD() {
   const active = combat?.initiative[combat.activeIndex];
   const isMyTurn = !!combat && active?.refId === String(session.characterId);
   const me = party?.find((c) => String(c._id) === String(session.characterId));
+  // Feat-driven combat controls (only shown if the character has the feat).
+  const myFeats = new Set((myCharacter?.feats ?? []).map((f) => f.index));
+  const hasPowerFeat = myFeats.has("great-weapon-master") || myFeats.has("sharpshooter");
+  const hasDefensiveDuelist = myFeats.has("defensive-duelist");
+  const hasLucky = myFeats.has("lucky");
+  const luckPoints = myCharacter?.combatResources?.luckPoints ?? 0;
 
   // Movement-range (client mirror of the server validation)
   const reachable = useMemo(() => {
@@ -107,9 +120,9 @@ export function CombatHUD() {
     };
     const onMonsterClick = (label: string) => {
       if (mode === "attack") {
-        void guard(() => attack({ sessionToken: session.sessionToken, targetLabel: label })).then(
-          () => setMode(null),
-        );
+        void guard(() =>
+          attack({ sessionToken: session.sessionToken, targetLabel: label, power: powerRef.current }),
+        ).then(() => setMode(null));
       } else if (mode === "spell-target" && spellIndex) {
         void guard(() =>
           castSpell({ sessionToken: session.sessionToken, spellIndex, targetLabel: label }),
@@ -224,6 +237,17 @@ export function CombatHUD() {
           >
             Attack
           </Button>
+          {hasPowerFeat && (
+            <Button
+              variant={powerAttack ? "ember" : "ghost"}
+              size="sm"
+              disabled={combat.turnState.actionUsed}
+              onClick={() => setPowerAttack((p) => !p)}
+              title="Great Weapon Master / Sharpshooter: −5 to hit, +10 damage"
+            >
+              −5/+10 {powerAttack ? "on" : "off"}
+            </Button>
+          )}
           {spells.length > 0 && (
             <span className="flex items-center gap-1">
               <select
@@ -270,6 +294,27 @@ export function CombatHUD() {
               {a}
             </Button>
           ))}
+          {hasDefensiveDuelist && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => guard(() => brace({ sessionToken: session.sessionToken }))}
+              title="Defensive Duelist: +proficiency to AC against the next melee attack this round"
+            >
+              brace
+            </Button>
+          )}
+          {hasLucky && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={luckPoints <= 0}
+              onClick={() => guard(() => spendLuck({ sessionToken: session.sessionToken }))}
+              title="Lucky: spend a luck point to reroll a d20"
+            >
+              🍀 {luckPoints}
+            </Button>
+          )}
           <Button
             variant="ember"
             size="sm"

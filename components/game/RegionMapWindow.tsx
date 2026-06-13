@@ -57,6 +57,8 @@ export function RegionMapWindow({ onClose }: { onClose: () => void }) {
   const factions = codex?.factions ?? [];
   const pois = codex?.pois ?? [];
   const markers = pois.filter((p) => p.x != null && p.y != null);
+  // The current location, for the gliding "you are here" beacon (always has coords).
+  const here = markers.find((m) => m.isCurrent);
   const selectedPoi = selected ? (pois.find((p) => p.slug === selected) ?? null) : null;
   const selectedFaction = selectedPoi?.factionSlug
     ? (factions.find((f) => f.slug === selectedPoi.factionSlug) ?? null)
@@ -124,6 +126,22 @@ export function RegionMapWindow({ onClose }: { onClose: () => void }) {
                     {KIND_ICON[m.kind] ?? "•"}
                   </button>
                 ))}
+                {/* "You are here" beacon — a single element whose left/top
+                    transition, so it glides to the new spot when the party moves. */}
+                {here && (
+                  <div
+                    aria-hidden
+                    style={{ left: `${here.x! * 100}%`, top: `${here.y! * 100}%` }}
+                    className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full flex flex-col items-center transition-[left,top] duration-700 ease-out"
+                  >
+                    <span className="font-display text-[0.5rem] tracking-[0.2em] uppercase text-gold-bright bg-ink/85 px-1.5 py-0.5 border border-gold mb-0.5 whitespace-nowrap">
+                      You are here
+                    </span>
+                    <span className="text-gold-bright text-lg leading-none animate-ember-pulse drop-shadow-[0_0_6px_rgba(245,158,11,0.7)]">
+                      ▾
+                    </span>
+                  </div>
+                )}
               </div>
             ) : map?.status === "generating" ? (
               <p className="font-narrative italic text-sm text-arcane-soft text-center py-16 animate-flicker">

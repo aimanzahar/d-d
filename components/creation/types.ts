@@ -6,7 +6,7 @@ export type CreationData = FunctionReturnType<typeof api.srdData.creationData>;
 export type RaceList = FunctionReturnType<typeof api.srdData.listRaces>;
 export type ClassList = FunctionReturnType<typeof api.srdData.listClasses>;
 
-export type ChoicePick = { key: string; categoryPicks?: string[][] };
+export type ChoicePick = { key: string; categoryPicks?: string[][]; featChoice?: string };
 
 export type Draft = {
   raceIndex: string | null;
@@ -20,6 +20,7 @@ export type Draft = {
   name: string;
   alignment: string;
   notes: string;
+  portraitStorageId: string | null;
 };
 
 export const EMPTY_DRAFT: Draft = {
@@ -34,4 +35,5 @@ export const EMPTY_DRAFT: Draft = {
   name: "",
   alignment: "",
   notes: "",
+  portraitStorageId: null,
 };

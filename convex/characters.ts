@@ -9,11 +9,14 @@ import {
   type AbilityKey,
 } from "./lib/rules5e";
 import { buildChoiceNodes, validateNodePicks, type GrantedItem } from "./srd/choice";
+import { FEATS } from "./srd/feats";
+import { publicStorageUrl } from "./images";
 import { getSrd, loadTraits, spellPickPlan } from "./srdData";
 
 const pickValidator = v.object({
   key: v.string(),
   categoryPicks: v.optional(v.array(v.array(v.string()))),
+  featChoice: v.optional(v.string()),
 });
 
 type InventoryItem = { itemIndex?: string; name: string; quantity: number; equipped: boolean };
@@ -79,6 +82,7 @@ export const create = mutation({
     submission: v.record(v.string(), v.array(pickValidator)),
     cantrips: v.array(v.string()),
     spells: v.array(v.string()),
+    portraitStorageId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {
     const player = await requirePlayer(ctx, args.sessionToken);
@@ -173,9 +177,69 @@ export const create = mutation({
         buckets.tools.push((doc?.data as any)?.name ?? index);
     }
 
+    // --- Feats (granted by a variant race) ----------------------------------
+    // Validated against the FINAL ability scores computed above. Persistent
+    // ability bonuses are applied here — BEFORE the spell/HP/AC math below — so
+    // every downstream derivation sees them. Feats are recorded on the sheet;
+    // their combat hooks read FEATS at runtime (combat.ts).
+    const chosenFeats: { index: string; choices?: any }[] = [];
+    let hpPerLevelBonus = 0; // Tough
+    let mobileSpeedBonus = 0; // Mobile
+    const resilientSaves: string[] = [];
+    let hasLucky = false;
+    for (const pick of args.submission["race.feat"] ?? []) {
+      const feat = FEATS[pick.key];
+      if (!feat) throw new ConvexError({ code: "invalid_choice", detail: `unknown feat ${pick.key}` });
+      if (feat.prereq) {
+        const ability =
+          feat.prereq.kind === "spellcasting"
+            ? (cls.spellcasting?.spellcasting_ability?.index as AbilityKey | undefined)
+            : feat.prereq.ability;
+        if (!ability || abilities[ability] < feat.prereq.minScore) {
+          throw new ConvexError({ code: "invalid_choice", detail: `${feat.name} prerequisite not met` });
+        }
+      }
+      let choices: { ability: string } | undefined;
+      if (feat.effects?.chooseAbility) {
+        const ab = pick.featChoice as AbilityKey | undefined;
+        if (!ab || !ABILITY_KEYS.includes(ab)) {
+          throw new ConvexError({ code: "invalid_choice", detail: `${feat.name} needs an ability choice` });
+        }
+        abilities[ab] += feat.effects.chooseAbility.amount;
+        if (feat.effects.chooseAbility.addSaveProficiency) resilientSaves.push(ab);
+        choices = { ability: ab };
+      }
+      if (feat.effects?.abilityBonus) {
+        abilities[feat.effects.abilityBonus.ability] += feat.effects.abilityBonus.amount;
+      }
+      if (feat.effects?.armorProficiency) buckets.armor.push(feat.effects.armorProficiency);
+      if (feat.effects?.hpPerLevel) hpPerLevelBonus += feat.effects.hpPerLevel;
+      if (feat.effects?.speedBonus) mobileSpeedBonus += feat.effects.speedBonus;
+      if (feat.combat?.luckPerLongRest) hasLucky = true;
+      chosenFeats.push({ index: feat.index, ...(choices ? { choices } : {}) });
+    }
+    const combatResources = chosenFeats.some((f) => FEATS[f.index]?.combat)
+      ? { luckPoints: hasLucky ? FEATS.lucky.combat!.luckPerLongRest! : 0 }
+      : undefined;
+
+    // Languages: race + subrace auto-grants, plus chosen bonus languages. A
+    // player must never pick a language they already know — cross-node dedup is
+    // enforced here (validateNodePicks only sees one node at a time). Reject
+    // duplicates outright (keyed on language index), then persist unique names.
+    const autoLangs = [
+      ...(race.languages as any[]),
+      ...((subrace?.languages as any[]) ?? []),
+    ].map((l: any) => ({ index: l.index, name: l.name }));
+    const knownLangIndexes = new Set(autoLangs.map((l) => l.index));
+    const seenChosen = new Set<string>();
+    for (const g of grantedByKind["language"] ?? []) {
+      if (knownLangIndexes.has(g.index) || seenChosen.has(g.index)) {
+        throw new ConvexError({ code: "invalid_choice", detail: "duplicate language" });
+      }
+      seenChosen.add(g.index);
+    }
     const languages = [
-      ...(race.languages as any[]).map((l: any) => l.name),
-      ...((subrace?.languages as any[]) ?? []).map((l: any) => l.name),
+      ...autoLangs.map((l) => l.name),
       ...(grantedByKind["language"] ?? []).map((g) => g.name),
     ];
 
@@ -284,9 +348,16 @@ export const create = mutation({
     let maxHp = cls.hit_die + conMod;
     // Dwarven Toughness: +1 max HP per level
     if (traits.some((t: any) => t.index === "dwarven-toughness")) maxHp += 1;
+    // Tough feat: +2 HP per level (level 1 here; levelUp reapplies the scaling).
+    maxHp += hpPerLevelBonus * 1;
 
     // --- Persist (re-forging in lobby replaces the old hero) -----------------
     if (player.characterId) {
+      const prev = await ctx.db.get(player.characterId);
+      // Drop the old portrait blob unless the re-forge kept the same one.
+      if (prev?.portraitStorageId && prev.portraitStorageId !== args.portraitStorageId) {
+        await ctx.storage.delete(prev.portraitStorageId);
+      }
       await ctx.db.delete(player.characterId);
     }
     const characterId = await ctx.db.insert("characters", {
@@ -307,10 +378,12 @@ export const create = mutation({
       tempHp: 0,
       hitDice: { die: cls.hit_die, max: 1, used: 0 },
       ac,
-      speed: race.speed,
+      speed: race.speed + mobileSpeedBonus,
       proficiencies: {
         skills: buckets.skills,
-        savingThrows: (cls.saving_throws as any[]).map((s) => s.index),
+        savingThrows: [
+          ...new Set([...(cls.saving_throws as any[]).map((s) => s.index), ...resilientSaves]),
+        ],
         armor: buckets.armor,
         weapons: buckets.weapons,
         tools: buckets.tools,
@@ -328,6 +401,9 @@ export const create = mutation({
         baseScores: args.baseScores,
         subtraits: (grantedByKind["subtrait"] ?? []).map((g) => g.index),
       },
+      feats: chosenFeats,
+      combatResources,
+      portraitStorageId: args.portraitStorageId,
       notes: args.notes.slice(0, 2000),
     });
     await ctx.db.patch(player._id, { characterId });
@@ -437,7 +513,12 @@ export const levelUp = mutation({
     const levels = (await getSrd(ctx, "levels", `${character.classIndex}-${newLevel}`))
       .data as any;
     const conMod = abilityMod(character.abilities.con);
-    const hpGain = Math.max(1, Math.ceil((character.hitDice.die + 1) / 2) + conMod);
+    let hpGain = Math.max(1, Math.ceil((character.hitDice.die + 1) / 2) + conMod);
+    // Tough (and any +HP-per-level feat) keeps scaling on level up.
+    hpGain += (character.feats ?? []).reduce(
+      (sum, f) => sum + (FEATS[f.index]?.effects?.hpPerLevel ?? 0),
+      0,
+    );
 
     let spellcasting = character.spellcasting;
     if (spellcasting && levels.spellcasting) {
@@ -488,5 +569,24 @@ export const getParty = query({
       .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
       .collect();
     return characters;
+  },
+});
+
+// Upload URL for a character portrait (free path). The self-hosted upload URL
+// is LAN-bound, so the client rewrites it via lib/storageUrl before POSTing.
+export const generatePortraitUploadUrl = mutation({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    await requirePlayer(ctx, args.sessionToken);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+// Resolve a portrait storage id to a public URL (rewritten off the LAN origin).
+export const portraitUrl = query({
+  args: { storageId: v.optional(v.id("_storage")) },
+  handler: async (ctx, args) => {
+    if (!args.storageId) return null;
+    return publicStorageUrl(await ctx.storage.getUrl(args.storageId));
   },
 });

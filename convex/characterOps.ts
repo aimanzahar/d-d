@@ -292,6 +292,13 @@ export const applyRest = internalMutation({
               slots: character.spellcasting.slots.map((s) => ({ ...s, used: 0 })),
             }
           : undefined;
+        // Lucky feat: luck points (3) recharge on a long rest.
+        const luckMax = (character.feats ?? []).some((f) => f.index === "lucky") ? 3 : 0;
+        const combatResources = character.combatResources
+          ? { ...character.combatResources, luckPoints: luckMax }
+          : luckMax
+            ? { luckPoints: luckMax }
+            : undefined;
         await ctx.db.patch(id, {
           currentHp: character.maxHp,
           tempHp: 0,
@@ -303,6 +310,7 @@ export const applyRest = internalMutation({
           deathSaves: { successes: 0, failures: 0 },
           conditions: character.conditions.filter((c) => c.name === "dead"),
           ...(spellcasting ? { spellcasting } : {}),
+          ...(combatResources ? { combatResources } : {}),
         });
       }
       // Short rest: hit-dice spending arrives with the sheet UI later; the

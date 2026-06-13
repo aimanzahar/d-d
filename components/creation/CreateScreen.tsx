@@ -6,7 +6,9 @@ import { ConvexError } from "convex/values";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { useSession } from "@/hooks/useSession";
+import { publicStorageUrl } from "@/lib/storageUrl";
 import { ABILITY_KEYS, ABILITY_NAMES, abilityMod, fmtMod, type AbilityKey } from "@/lib/abilities";
 import { Button } from "@/components/ui/Button";
 import { Label, TextArea, TextInput } from "@/components/ui/Field";
@@ -17,6 +19,7 @@ import { StepChoices, nodeSatisfied } from "./StepChoices";
 import { StepClass } from "./StepClass";
 import { StepRace } from "./StepRace";
 import { StepSpells, expectedSpellCount } from "./StepSpells";
+import { finalAbilityScores } from "./derive";
 import { EMPTY_DRAFT, type Draft } from "./types";
 import { POINT_BUY_BUDGET } from "@/lib/abilities";
 
@@ -45,6 +48,13 @@ export function CreateScreen() {
   const [error, setError] = useState<string | null>(null);
   const [inspiring, setInspiring] = useState(false);
   const inspireBackstory = useAction(api.inspiration.generateBackstory);
+  const [portraitBusy, setPortraitBusy] = useState(false);
+  const getPortraitUploadUrl = useMutation(api.characters.generatePortraitUploadUrl);
+  const generatePortrait = useAction(api.portraits.generatePortrait);
+  const portraitUrl = useQuery(
+    api.characters.portraitUrl,
+    draft.portraitStorageId ? { storageId: draft.portraitStorageId as Id<"_storage"> } : "skip",
+  );
 
   const data = useQuery(
     api.srdData.creationData,
@@ -134,14 +144,59 @@ export function CreateScreen() {
     }
   }
 
-  // Final scores for the review card
-  const finalScores = { ...draft.baseScores };
-  for (const b of data?.summary.fixedBonuses ?? []) {
-    finalScores[b.ability as AbilityKey] += b.bonus;
+  // Portrait: upload your own (free) — the self-hosted upload URL is LAN-bound,
+  // so it's rewritten onto the public origin before the POST.
+  async function handleUploadPortrait(file: File) {
+    if (portraitBusy) return;
+    setPortraitBusy(true);
+    setError(null);
+    try {
+      const uploadUrl = await getPortraitUploadUrl({ sessionToken: session.sessionToken });
+      const res = await fetch(publicStorageUrl(uploadUrl), {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!res.ok) throw new Error("upload failed");
+      const { storageId } = await res.json();
+      update({ portraitStorageId: storageId });
+    } catch {
+      setError("The portrait could not be saved. Try a smaller image.");
+    } finally {
+      setPortraitBusy(false);
+    }
   }
-  for (const p of draft.submission["race.abil"] ?? []) {
-    if (ABILITY_KEYS.includes(p.key as AbilityKey)) finalScores[p.key as AbilityKey] += 1;
+
+  // Portrait: conjure one from race + class + backstory (gated by a cooldown).
+  async function handleGeneratePortrait() {
+    if (portraitBusy || !draft.raceIndex || !draft.classIndex) return;
+    setPortraitBusy(true);
+    setError(null);
+    try {
+      const { storageId } = await generatePortrait({
+        sessionToken: session.sessionToken,
+        campaignId: session.campaignId,
+        raceIndex: draft.raceIndex,
+        classIndex: draft.classIndex,
+        name: draft.name.trim() || undefined,
+        notes: draft.notes || undefined,
+      });
+      update({ portraitStorageId: storageId });
+    } catch (e) {
+      const code = e instanceof ConvexError ? (e.data as { code?: string })?.code : null;
+      setError(
+        code === "portrait_cooldown"
+          ? "The artist needs a breath — try again in a moment."
+          : "The portrait could not be conjured.",
+      );
+    } finally {
+      setPortraitBusy(false);
+    }
   }
+
+  // Final scores for the review card + feat prereq gating (reads the chosen
+  // race.abil bonuses at their true amount — Custom Lineage grants +2).
+  const finalScores = finalAbilityScores(data, draft.baseScores, draft.submission);
 
   async function handleForge() {
     setBusy(true);
@@ -160,6 +215,7 @@ export function CreateScreen() {
         submission: draft.submission,
         cantrips: draft.cantrips,
         spells: draft.spells,
+        portraitStorageId: (draft.portraitStorageId ?? undefined) as Id<"_storage"> | undefined,
       });
       router.push(`/c/${session.inviteCode}/lobby`);
     } catch (e) {
@@ -214,7 +270,9 @@ export function CreateScreen() {
         {step === "race" && <StepRace races={races} draft={draft} update={update} />}
         {step === "class" && <StepClass classes={classes} draft={draft} update={update} />}
         {step === "abilities" && <StepAbilities draft={draft} update={update} data={data} />}
-        {step === "choices" && <StepChoices data={data} draft={draft} update={update} />}
+        {step === "choices" && (
+          <StepChoices data={data} draft={draft} update={update} finalScores={finalScores} />
+        )}
         {step === "spells" && data && <StepSpells data={data} draft={draft} update={update} />}
         {step === "review" && (
           <div className="grid md:grid-cols-2 gap-6">
@@ -270,6 +328,49 @@ export function CreateScreen() {
               <h3 className="font-display text-sm tracking-wider text-gold mb-4">
                 {draft.name.trim() || "Unnamed"} — {draft.raceIndex} {draft.classIndex}
               </h3>
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-24 h-24 shrink-0 border border-gold-dim/40 bg-ink/40 overflow-hidden flex items-center justify-center">
+                  {portraitUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={portraitUrl} alt="Portrait" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-parchment-faint text-[0.55rem] text-center px-1 leading-tight">
+                      no portrait
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    className={`font-display text-[0.55rem] tracking-[0.2em] uppercase px-2 py-1 border border-gold-dim/40 text-parchment-dim hover:border-gold text-center ${
+                      portraitBusy ? "opacity-50 cursor-default" : "cursor-pointer"
+                    }`}
+                  >
+                    Upload
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={portraitBusy}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void handleUploadPortrait(f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className={`font-display text-[0.55rem] tracking-[0.2em] uppercase px-2 py-1 border border-arcane/40 text-arcane-soft hover:border-arcane ${
+                      portraitBusy ? "animate-flicker cursor-default" : "cursor-pointer"
+                    }`}
+                    disabled={portraitBusy}
+                    onClick={handleGeneratePortrait}
+                    title="Conjure a portrait from your race, class, and backstory"
+                  >
+                    {portraitBusy ? "conjuring…" : "✦ generate"}
+                  </button>
+                </div>
+              </div>
               <div className="grid grid-cols-3 gap-2 mb-4">
                 {ABILITY_KEYS.map((k) => (
                   <div key={k} className="border border-gold-dim/30 px-2 py-1.5 text-center">

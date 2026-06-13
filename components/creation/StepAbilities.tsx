@@ -12,10 +12,18 @@ import {
 } from "@/lib/abilities";
 import type { CreationData, Draft } from "./types";
 import { Panel } from "@/components/ui/Panel";
+import { HoverPopover } from "@/components/ui/HoverPopover";
+import { ABILITY_SCORES } from "@/convex/srd/static";
+import { raceAbilBonuses } from "./derive";
 
 export function pointsSpent(scores: Record<AbilityKey, number>): number {
   return ABILITY_KEYS.reduce((sum, k) => sum + (POINT_BUY_COST[scores[k]] ?? 99), 0);
 }
+
+// Ability index ("str"…"cha") -> its full name + flavor paragraphs, for the
+// hover/tap tooltip on each ability panel.
+const ABILITY_INFO: Record<string, { full_name: string; desc: readonly string[] }> =
+  Object.fromEntries(ABILITY_SCORES.map((a) => [a.index, a]));
 
 export function StepAbilities({
   draft,
@@ -30,9 +38,10 @@ export function StepAbilities({
   for (const b of data?.summary.fixedBonuses ?? []) {
     bonuses.set(b.ability as AbilityKey, (bonuses.get(b.ability as AbilityKey) ?? 0) + b.bonus);
   }
-  // chosen +1s (half-elf) granted via the race.abil node
-  for (const pick of draft.submission["race.abil"] ?? []) {
-    bonuses.set(pick.key as AbilityKey, (bonuses.get(pick.key as AbilityKey) ?? 0) + 1);
+  // Chosen ability bonuses via the race.abil node (half-elf +1s, Custom Lineage +2),
+  // read at their true amount and keyed on the granted ability.
+  for (const [ability, amount] of raceAbilBonuses(data, draft.submission)) {
+    bonuses.set(ability, (bonuses.get(ability) ?? 0) + amount);
   }
 
   const spent = pointsSpent(draft.baseScores);
@@ -89,9 +98,22 @@ export function StepAbilities({
           return (
             <Panel key={key} innerClassName="p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="font-display text-xs tracking-[0.2em] uppercase text-gold">
-                  {ABILITY_NAMES[key]}
-                </span>
+                <HoverPopover
+                  content={
+                    <div className="space-y-1.5">
+                      <p className="font-display text-xs tracking-[0.2em] uppercase text-gold">
+                        {ABILITY_INFO[key]?.full_name ?? ABILITY_NAMES[key]}
+                      </p>
+                      {(ABILITY_INFO[key]?.desc ?? []).map((d, i) => (
+                        <p key={i}>{d}</p>
+                      ))}
+                    </div>
+                  }
+                >
+                  <span className="font-display text-xs tracking-[0.2em] uppercase text-gold cursor-help border-b border-dotted border-gold-dim/50">
+                    {ABILITY_NAMES[key]}
+                  </span>
+                </HoverPopover>
                 <span className="font-dice text-lg text-parchment">
                   {final}
                   <span className="text-arcane-soft text-sm ml-1.5">{fmtMod(abilityMod(final))}</span>

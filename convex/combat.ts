@@ -432,11 +432,16 @@ export const move = mutation({
       turnState: { ...combat.turnState, movementUsed: combat.turnState.movementUsed + cost },
     });
     if (provokers.length > 0 && !disengaged) {
+      // Mobile feat (approx): a creature the mover attacked this turn can't take
+      // an OA against them — surfaced for the GM to honor.
+      const mobile = (character.feats ?? []).some((f) => f.index === "mobile")
+        ? " (They have the Mobile feat — no opportunity attack from any creature they attacked this turn.)"
+        : "";
       // The GM decides whether the opportunity attack happens (queued, not immediate)
       await ctx.db.insert("messages", {
         campaignId: player.campaignId,
         kind: "system",
-        content: `${character.name} moved away from ${provokers.join(", ")} — this may provoke opportunity attacks (your call: npc_attack or let it slide).`,
+        content: `${character.name} moved away from ${provokers.join(", ")} — this may provoke opportunity attacks (your call: npc_attack or let it slide).${mobile}`,
         status: "complete",
         ooc: true,
         processed: false,
@@ -447,10 +452,16 @@ export const move = mutation({
 });
 
 export const attack = mutation({
-  args: { sessionToken: v.string(), targetLabel: v.string(), weaponName: v.optional(v.string()) },
+  args: {
+    sessionToken: v.string(),
+    targetLabel: v.string(),
+    weaponName: v.optional(v.string()),
+    power: v.optional(v.boolean()), // Great Weapon Master / Sharpshooter -5/+10 toggle
+  },
   handler: async (ctx, args) => {
     const { player, character, combat } = await requireActivePc(ctx, args.sessionToken);
     if (combat.turnState.actionUsed) throw new ConvexError({ code: "action_used" });
+    const featSet = new Set((character.feats ?? []).map((f) => f.index));
     const monsters = await combatMonsters(ctx, combat._id);
     const target = fuzzyMonster(monsters, args.targetLabel);
     if (!target) {
@@ -484,6 +495,14 @@ export const attack = mutation({
     const mod = isRanged ? dexMod : finesse ? Math.max(strMod, dexMod) : strMod;
     const prof = profBonus(character.level);
 
+    // Great Weapon Master (heavy melee) / Sharpshooter (ranged): optional -5 to
+    // hit for +10 damage, when the player opts in and the weapon qualifies.
+    const isHeavy = properties.includes("heavy") || properties.includes("two-handed");
+    const power =
+      args.power === true &&
+      ((featSet.has("great-weapon-master") && !isRanged && isHeavy) ||
+        (featSet.has("sharpshooter") && isRanged));
+
     // Range check
     const dist = chebyshev(character.position!, target.position);
     if (isRanged) {
@@ -507,8 +526,16 @@ export const attack = mutation({
     if (isRanged && monsters.some((m) => !m.isDead && chebyshev(character.position!, m.position) <= 1)) {
       advantage = advantage === "advantage" ? "normal" : "disadvantage";
     }
+    // Grappler (approx): advantage against a grappled/restrained target.
+    if (
+      featSet.has("grappler") &&
+      advantage !== "disadvantage" &&
+      target.conditions.some((c) => ["grappled", "restrained"].includes(c.name))
+    ) {
+      advantage = "advantage";
+    }
 
-    const attackRoll = rollD20(advantage, mod + prof);
+    const attackRoll = rollD20(advantage, mod + prof - (power ? 5 : 0));
     const autoCrit =
       !isRanged && dist <= 1 && target.conditions.some((c) => ["paralyzed", "unconscious"].includes(c.name));
     const crit = attackRoll.d20 === 20 || (autoCrit && attackRoll.total >= target.ac);
@@ -528,14 +555,27 @@ export const attack = mutation({
     });
 
     let damageTotal = 0;
+    let killed = false;
+    let savageUsed = false;
     if (hit) {
       const baseNotation = `${data?.damage?.damage_dice ?? "1d4"}`.replace(/\s/g, "");
       const parsed = parseNotation(baseNotation) ? baseNotation : "1d4";
       const dmg = rollNotation(parsed)!;
-      let total = dmg.total + mod;
-      if (crit) total += rollNotation(diceOnly(parsed))!.total;
+      const flat = mod + (power ? 10 : 0);
+      let total = dmg.total + flat + (crit ? rollNotation(diceOnly(parsed))!.total : 0);
+      // Savage Attacker: once per turn, reroll the weapon dice and keep the better total.
+      if (
+        featSet.has("savage-attacker") &&
+        !isRanged &&
+        character.combatResources?.savageUsedRound !== combat.round
+      ) {
+        const rerollDice = rollNotation(parsed)!.total + (crit ? rollNotation(diceOnly(parsed))!.total : 0);
+        total = Math.max(total, rerollDice + flat);
+        savageUsed = true;
+      }
       damageTotal = Math.max(1, total);
       const result = await damageEntity(ctx, { kind: "monster", monster: target }, damageTotal);
+      killed = result.status === "dead";
       await publicRoll(ctx, player.campaignId, {
         actorName: character.name,
         purpose: "damage",
@@ -564,7 +604,67 @@ export const attack = mutation({
     await ctx.db.patch(combat._id, {
       turnState: { ...combat.turnState, actionUsed: true },
     });
-    return { hit, crit, total: attackRoll.total, damage: damageTotal };
+    if (savageUsed) {
+      await ctx.db.patch(character._id, {
+        combatResources: {
+          ...(character.combatResources ?? { luckPoints: 0 }),
+          savageUsedRound: combat.round,
+        },
+      });
+    }
+    // GWM grants a bonus melee attack on a crit or kill — surfaced as a flag
+    // (the engine doesn't model bonus actions; the player acts on it manually).
+    const bonusAttackAvailable =
+      featSet.has("great-weapon-master") && !isRanged && isHeavy && (crit || killed);
+    return { hit, crit, total: attackRoll.total, damage: damageTotal, bonusAttackAvailable };
+  },
+});
+
+// Defensive Duelist (approx): declare a brace on your turn — the next melee
+// attack against you this round is met with +proficiency AC (toolNpcAttack reads it).
+export const braceDefensiveDuelist = mutation({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    const { character, combat } = await requireActivePc(ctx, args.sessionToken);
+    if (!(character.feats ?? []).some((f) => f.index === "defensive-duelist")) {
+      throw new ConvexError({ code: "no_feat" });
+    }
+    await ctx.db.patch(character._id, {
+      combatResources: {
+        ...(character.combatResources ?? { luckPoints: 0 }),
+        defensiveDuelistRound: combat.round,
+      },
+    });
+    return { ok: true, round: combat.round };
+  },
+});
+
+// Lucky: spend a luck point to reroll a d20. A fresh d20 is rolled and shown;
+// the player uses the better result (an approximation — the engine doesn't
+// rewind the original roll).
+export const spendLuck = mutation({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, args) => {
+    const player = await requirePlayer(ctx, args.sessionToken);
+    if (!player.characterId) throw new ConvexError({ code: "no_character" });
+    const character = await ctx.db.get(player.characterId);
+    if (!character) throw new ConvexError({ code: "not_found" });
+    const hasLucky = (character.feats ?? []).some((f) => f.index === "lucky");
+    const points = character.combatResources?.luckPoints ?? 0;
+    if (!hasLucky || points <= 0) throw new ConvexError({ code: "no_luck" });
+    await ctx.db.patch(character._id, {
+      combatResources: { ...(character.combatResources ?? { luckPoints: 0 }), luckPoints: points - 1 },
+    });
+    const d20 = rollDie(20);
+    await ctx.db.insert("messages", {
+      campaignId: character.campaignId,
+      kind: "system",
+      content: `🍀 ${character.name} spends a luck point and rerolls a d20: ${d20}. (${points - 1} luck left — use the better result.)`,
+      status: "complete",
+      ooc: false,
+      processed: true,
+    });
+    return { d20, luckLeft: points - 1 };
   },
 });
 
@@ -899,6 +999,36 @@ export const autoAdvanceIfMonsterStuck = internalMutation({
   },
 });
 
+// Safety net (player side): once the active PC has committed their action this
+// turn (turnState.actionUsed) and the GM has finished resolving it (no
+// unprocessed messages remain — a pending player roll leaves one, deferring us),
+// advance initiative. Mirror of autoAdvanceIfMonsterStuck for the player side,
+// so "typing your action ends your turn" holds even if the model forgets advance_turn.
+export const autoAdvanceIfPlayerActionDone = internalMutation({
+  args: { campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    const pending = await ctx.db
+      .query("messages")
+      .withIndex("by_campaign_unprocessed", (q) =>
+        q.eq("campaignId", args.campaignId).eq("processed", false),
+      )
+      .first();
+    if (pending) return { advanced: false }; // GM still resolving / roll outstanding
+    const state = await activeCombat(ctx, args.campaignId);
+    if (!state) return { advanced: false };
+    const entry = state.combat.initiative[state.combat.activeIndex];
+    if (entry?.kind !== "pc") return { advanced: false };
+    if (!state.combat.turnState.actionUsed) return { advanced: false }; // hasn't acted yet
+    // A dying/unconscious PC's turn belongs to the death-save flow — don't double-advance.
+    const character = await ctx.db.get(entry.refId as Id<"characters">);
+    if (character?.conditions.some((c) => ["unconscious", "dead", "stable"].includes(c.name))) {
+      return { advanced: false };
+    }
+    await advanceAndSignal(ctx, args.campaignId, state.combat);
+    return { advanced: true, advancedFrom: entry.name };
+  },
+});
+
 // ------------------------------------------------ GM-tool internal mutations
 
 function parseSpeedFeet(speed: any): number {
@@ -1059,8 +1189,15 @@ export const toolStartCombat = internalMutation({
     // Party initiative — public roll docs so dice rain on every screen
     for (const c of characters) {
       const dexMod = abilityMod(c.abilities.dex);
+      const alertBonus = (c.feats ?? []).some((f) => f.index === "alert") ? 5 : 0; // Alert feat
       const outcome = rollD20("normal", dexMod);
-      initiative.push({ kind: "pc", refId: String(c._id), name: c.name, total: outcome.total, dexMod });
+      initiative.push({
+        kind: "pc",
+        refId: String(c._id),
+        name: c.name,
+        total: outcome.total + alertBonus,
+        dexMod,
+      });
       await publicRoll(ctx, args.campaignId, {
         actorName: c.name,
         purpose: "initiative",
@@ -1157,12 +1294,20 @@ export const toolNpcAttack = internalMutation({
       targetConditions: target.conditions.map((c) => c.name),
       melee: attack.range === undefined,
     });
+    // Defensive Duelist (approx): a finesse-wielder who braced this round adds
+    // their proficiency bonus to AC against this melee attack.
+    const braced =
+      attack.range === undefined &&
+      (target.feats ?? []).some((f) => f.index === "defensive-duelist") &&
+      target.combatResources?.defensiveDuelistRound === state.combat.round;
+    const targetAc = target.ac + (braced ? profBonus(target.level) : 0);
+
     const atk = rollD20(advantage, attack.attackBonus);
     const fumble = atk.d20 === 1;
     const autoCrit =
       attack.range === undefined && dist <= 5 &&
       target.conditions.some((c) => ["paralyzed", "unconscious"].includes(c.name));
-    const hit = !fumble && (atk.d20 === 20 || atk.total >= target.ac);
+    const hit = !fumble && (atk.d20 === 20 || atk.total >= targetAc);
     const crit = hit && (atk.d20 === 20 || autoCrit);
 
     await publicRoll(ctx, args.campaignId, {
@@ -1177,7 +1322,7 @@ export const toolNpcAttack = internalMutation({
     });
 
     if (!hit) {
-      return { ok: true, hit: false, attackTotal: atk.total, vsAC: target.ac };
+      return { ok: true, hit: false, attackTotal: atk.total, vsAC: targetAc };
     }
     const dmg = rollNotation(attack.damageDice) ?? rollNotation("1d4")!;
     let damage = dmg.total;

@@ -18,7 +18,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/convex/_generated/api";
@@ -383,6 +383,10 @@ export function InventoryPopout({
 
   const setEquipped = useMutation(api.characters.setEquipped);
   const reorderInventory = useMutation(api.characters.reorderInventory);
+  const portraitUrl = useQuery(
+    api.characters.portraitUrl,
+    character.portraitStorageId ? { storageId: character.portraitStorageId } : "skip",
+  );
 
   const [selected, setSelected] = useState<string | null>(null);
   const [activeDrag, setActiveDrag] = useState<DragData | null>(null);
@@ -536,8 +540,18 @@ export function InventoryPopout({
       >
         <Panel innerClassName="flex flex-col max-h-[86vh]">
           <div className="flex items-center justify-between gap-2 border-b border-gold-dim/30 px-3.5 py-2.5">
-            <span className="font-display text-[0.6rem] tracking-[0.25em] uppercase text-gold truncate">
-              {character.name}&apos;s pack
+            <span className="flex items-center gap-2 min-w-0">
+              {portraitUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={portraitUrl}
+                  alt=""
+                  className="w-7 h-7 rounded-full object-cover border border-gold-dim/50 shrink-0"
+                />
+              )}
+              <span className="font-display text-[0.6rem] tracking-[0.25em] uppercase text-gold truncate">
+                {character.name}&apos;s pack
+              </span>
             </span>
             <button
               className="text-parchment-faint hover:text-parchment cursor-pointer shrink-0"
