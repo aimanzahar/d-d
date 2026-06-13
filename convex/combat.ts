@@ -319,7 +319,7 @@ export async function advanceAndSignal(ctx: MutationCtx, campaignId: Id<"campaig
     await ctx.db.insert("messages", {
       campaignId,
       kind: "system",
-      content: `Round ${next.round}: ${next.name} acts. Resolve this creature's turn now — move_token and npc_attack as needed, then advance_turn. Keep resolving consecutive monster turns until a player is up.`,
+      content: `Round ${next.round}: ${next.name} acts. Resolve ONLY this one creature's turn — move_token and npc_attack as needed, then narrate it in 1-2 sentences and call advance_turn. END your response after advance_turn; the engine will prompt you for the next combatant. Do NOT act for any other creature.`,
       status: "complete",
       ooc: true, // GM directive, hidden from players
       processed: false,
@@ -1096,8 +1096,8 @@ export const toolStartCombat = internalMutation({
         kind: "system",
         content:
           `Round 1: ${first.name} opens the fight. Check COMBAT STATE for whose turn it is — ` +
-          `if a monster is active, resolve its turn now (move_token and npc_attack as needed, then advance_turn), ` +
-          `continuing through consecutive monster turns until a player is up; ` +
+          `if a monster is active, resolve ONLY that one creature now (move_token and npc_attack as needed, then narrate it and call advance_turn), ` +
+          `and END your response — the engine will prompt you for the next combatant; ` +
           `if a player is already up, the opener was handled — briefly set the scene and stop.`,
         status: "complete",
         ooc: true, // GM directive, hidden from players
@@ -1113,7 +1113,7 @@ export const toolStartCombat = internalMutation({
       firstTurn: `${first.name} (${first.kind})`,
       instruction:
         first.kind === "monster"
-          ? "A monster acts first — resolve its turn now (move_token / npc_attack), then advance_turn."
+          ? "A monster acts first — resolve ONLY that one creature now (move_token / npc_attack), then narrate it and call advance_turn, and END your response."
           : "A player acts first. Describe the eruption of combat and STOP — wait for their action.",
     };
   },
@@ -1308,7 +1308,7 @@ export const toolAdvanceTurn = internalMutation({
       round: next.round,
       note:
         next.kind === "monster"
-          ? `${next.name} acts now — resolve its turn, then advance_turn again.`
+          ? `${next.name} is next — END your response now. The engine will prompt you to play them in a fresh turn.`
           : `${next.name} (a PLAYER) is up. Describe the moment briefly and STOP — do not act for them.`,
     };
   },

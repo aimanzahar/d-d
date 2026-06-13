@@ -134,19 +134,27 @@ export const respond = internalAction({
         { role: "user", content: context.contextBlock + memoryBlock },
       ];
 
-      gmMessageId = await ctx.runMutation(internal.messages.createGmMessage, {
-        campaignId: args.campaignId,
-      });
-
-      // Throttled append-only flushing into the message doc
+      // The GM narration message is created lazily — on the first real flush —
+      // so in combat a creature's roll docs (inserted during tool execution)
+      // sort BEFORE the narration that describes them. A pure-mechanical turn
+      // with no prose creates no message at all.
+      const isCombat = context.mode === "combat";
       let buffer = "";
       let lastFlush = Date.now();
+      const ensureMessage = async () => {
+        if (gmMessageId === null) {
+          gmMessageId = await ctx.runMutation(internal.messages.createGmMessage, {
+            campaignId: args.campaignId,
+          });
+        }
+      };
       const flush = async (force = false) => {
         if (!buffer) return;
         if (!force && buffer.length < FLUSH_CHARS && Date.now() - lastFlush < FLUSH_MS) return;
         const chunk = buffer;
         buffer = "";
         lastFlush = Date.now();
+        await ensureMessage();
         await ctx.runMutation(internal.messages.appendStreamChunk, {
           messageId: gmMessageId,
           campaignId: args.campaignId,
@@ -158,12 +166,14 @@ export const respond = internalAction({
       let endTurn = false;
       let streamedChars = 0;
       let result: StreamResult | undefined;
-      const maxIterations = context.mode === "combat" ? 10 : MAX_ITERATIONS;
+      const maxIterations = isCombat ? 10 : MAX_ITERATIONS;
       const onText = async (delta: string) => {
         buffer += delta;
         // trim: a bare "\n" alongside a tool call is not narration
         streamedChars += delta.trim().length;
-        await flush();
+        // In combat, defer flushing until after the iteration's tools have run
+        // (so narration lands below the dice); elsewhere stream live.
+        if (!isCombat) await flush();
       };
 
       for (let iteration = 0; iteration < maxIterations && !endTurn; iteration++) {
@@ -183,6 +193,7 @@ export const respond = internalAction({
           tool_calls: result.toolCalls,
         });
 
+        let advancedTurn = false;
         for (const call of result.toolCalls) {
           const toolResult = await executeCall(ctx, args.campaignId, call, errorBudget);
           transcript.push({
@@ -196,7 +207,15 @@ export const respond = internalAction({
           ) {
             endTurn = true; // wait for the player's dice
           }
+          if (call.function.name === "advance_turn" && (toolResult as any)?.ok === true) {
+            advancedTurn = true; // one creature per response — stop after this
+          }
         }
+
+        // Combat: this response's rolls are now in — flush its narration below
+        // them, then stop so the next creature is a fresh, separate turn.
+        if (isCombat) await flush(true);
+        if (advancedTurn) break;
       }
 
       // Reasoning models can burn the whole token budget on hidden
@@ -223,10 +242,13 @@ export const respond = internalAction({
       await flush(true);
       // A silent dice-wait (endTurn) is healthy — the roll prompt is up and
       // the feed's ghost guard drops the empty row; only true silence errors.
-      await ctx.runMutation(internal.messages.finalizeGmMessage, {
-        messageId: gmMessageId,
-        status: streamedChars > 0 || endTurn ? "complete" : "error",
-      });
+      // gmMessageId is null when a turn was pure mechanics with no prose.
+      if (gmMessageId !== null) {
+        await ctx.runMutation(internal.messages.finalizeGmMessage, {
+          messageId: gmMessageId,
+          status: streamedChars > 0 || endTurn ? "complete" : "error",
+        });
+      }
 
       // Combat safety net: if a monster is still the active combatant after
       // the GM finished (and we're not waiting on a player roll), the engine
@@ -246,10 +268,12 @@ export const respond = internalAction({
       }
 
       // Fire-and-forget memorization — never extends or blocks the turn
-      await ctx.scheduler.runAfter(0, internal.gm.memory.memorizeTurn, {
-        campaignId: args.campaignId,
-        gmMessageId,
-      });
+      if (gmMessageId !== null) {
+        await ctx.scheduler.runAfter(0, internal.gm.memory.memorizeTurn, {
+          campaignId: args.campaignId,
+          gmMessageId,
+        });
+      }
 
       const next = await ctx.runMutation(internal.gm.turn.finishTurn, args);
       if (next.continue) {
