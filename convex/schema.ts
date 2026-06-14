@@ -281,10 +281,31 @@ export default defineSchema({
     imageId: v.optional(v.id("images")),
     round: v.optional(v.number()), // combat round tag
     // Spoken narration (TTS): gm messages get audio synthesized post-finalize.
+    // audioStatus/audioStorageId are the legacy single-voice fields, retained for
+    // messages synthesized before per-speaker voices (docs/adr/0006) shipped.
     audioStatus: v.optional(
       v.union(v.literal("generating"), v.literal("done"), v.literal("failed")),
     ),
     audioStorageId: v.optional(v.id("_storage")),
+    // Per-speaker voices: a gm message is split into ordered voiced segments
+    // (narrator + tagged NPC dialogue), each synthesized to its own clip and
+    // played back in order. Parsed at finalize from the [[Name]]…[[/]] tags.
+    audioSegments: v.optional(
+      v.array(
+        v.object({
+          order: v.number(),
+          voiceId: v.string(),
+          text: v.string(), // TTS-ready line (tags + markdown already stripped)
+          audioStatus: v.union(
+            v.literal("pending"),
+            v.literal("generating"),
+            v.literal("done"),
+            v.literal("failed"),
+          ),
+          audioStorageId: v.optional(v.id("_storage")),
+        }),
+      ),
+    ),
   })
     .index("by_campaign", ["campaignId"])
     .index("by_campaign_unprocessed", ["campaignId", "processed"]),

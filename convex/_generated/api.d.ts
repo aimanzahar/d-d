@@ -22,6 +22,7 @@ import type * as gm_prompt from "../gm/prompt.js";
 import type * as gm_tools from "../gm/tools.js";
 import type * as gm_tts from "../gm/tts.js";
 import type * as gm_turn from "../gm/turn.js";
+import type * as gm_voices from "../gm/voices.js";
 import type * as images from "../images.js";
 import type * as inspiration from "../inspiration.js";
 import type * as lib_auth from "../lib/auth.js";
@@ -70,6 +71,7 @@ declare const fullApi: ApiFromModules<{
   "gm/tools": typeof gm_tools;
   "gm/tts": typeof gm_tts;
   "gm/turn": typeof gm_turn;
+  "gm/voices": typeof gm_voices;
   images: typeof images;
   inspiration: typeof inspiration;
   "lib/auth": typeof lib_auth;

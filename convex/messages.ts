@@ -6,6 +6,7 @@ import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { requirePlayer } from "./lib/auth";
 import { publicStorageUrl } from "./images";
+import { parseSegments, cleanForDisplay } from "./gm/voices";
 
 const GM_STALE_MS = 120_000;
 
@@ -67,8 +68,12 @@ export const list = query({
 });
 
 // Lightweight feed for the narration audio player: the most recent GM messages
-// that have synthesized audio, newest-first. The player watermarks at mount and
-// only voices messages that arrive afterward.
+// that have synthesized audio, newest-first. Each message carries an ordered
+// list of voiced segments (narrator + tagged NPC dialogue); the player plays a
+// message's segments in order, then advances. Legacy single-voice messages are
+// surfaced as a one-element list. The player watermarks at mount and only voices
+// messages that arrive afterward (plus segments that land later for the current
+// scene). See docs/adr/0006.
 export const narrationAudio = query({
   args: { sessionToken: v.string(), campaignId: v.id("campaigns") },
   handler: async (ctx, args) => {
@@ -78,16 +83,36 @@ export const narrationAudio = query({
       .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
       .order("desc")
       .take(25);
-    const narrated = recent.filter((m) => m.kind === "gm" && m.audioStorageId);
+    const narrated = recent.filter(
+      (m) => m.kind === "gm" && ((m.audioSegments?.length ?? 0) > 0 || !!m.audioStorageId),
+    );
     return Promise.all(
       narrated.map(async (m) => {
-        const raw = m.audioStorageId ? await ctx.storage.getUrl(m.audioStorageId) : null;
-        return {
-          id: String(m._id),
-          createdAt: m._creationTime,
-          audioStatus: m.audioStatus ?? null,
-          audioUrl: raw ? publicStorageUrl(raw) : null,
-        };
+        let segments: { order: number; audioStatus: string | null; audioUrl: string | null }[];
+        if (m.audioSegments?.length) {
+          const sorted = [...m.audioSegments].sort((a, b) => a.order - b.order);
+          segments = await Promise.all(
+            sorted.map(async (s) => {
+              const raw = s.audioStorageId ? await ctx.storage.getUrl(s.audioStorageId) : null;
+              return {
+                order: s.order,
+                audioStatus: s.audioStatus,
+                audioUrl: raw ? publicStorageUrl(raw) : null,
+              };
+            }),
+          );
+        } else {
+          // Legacy single-voice message (synthesized before per-speaker voices).
+          const raw = m.audioStorageId ? await ctx.storage.getUrl(m.audioStorageId) : null;
+          segments = [
+            {
+              order: 0,
+              audioStatus: m.audioStatus ?? null,
+              audioUrl: raw ? publicStorageUrl(raw) : null,
+            },
+          ];
+        }
+        return { id: String(m._id), createdAt: m._creationTime, segments };
       }),
     );
   },
@@ -225,6 +250,21 @@ export const finalizeGmMessage = internalMutation({
     // Empty error shells disappear rather than littering the feed
     if (args.status === "error" && message.content.trim() === "") {
       await ctx.db.delete(args.messageId);
+      return;
+    }
+    // On a completed gm message, split the prose into per-speaker voiced segments
+    // (docs/adr/0006) and rewrite the body to clean prose (voice tags removed)
+    // for the feed, transcript, and memory. gm/tts.synthesize fills each clip in.
+    if (args.status === "complete" && message.kind === "gm") {
+      const segments = parseSegments(message.content).map((s) => ({
+        ...s,
+        audioStatus: "pending" as const,
+      }));
+      await ctx.db.patch(args.messageId, {
+        status: args.status,
+        content: cleanForDisplay(message.content),
+        ...(segments.length > 0 ? { audioSegments: segments } : {}),
+      });
       return;
     }
     await ctx.db.patch(args.messageId, { status: args.status });

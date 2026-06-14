@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { stripVoiceTags } from "@/convex/gm/voices";
 
 // GM narration markdown. The model is only instructed to emit **bold**,
 // *italics*, and "> " read-aloud lines (convex/gm/prompt.ts), so this parses
@@ -129,7 +130,9 @@ function renderInline(text: string, highlight?: RegExp): ReactNode[] {
 // wherever the model forgot the markers.
 export function renderGmMarkdown(content: string, knownNames?: string[]): ReactNode {
   const highlight = knownNames ? buildNameRegex(knownNames) : undefined;
-  const lines = content.split("\n");
+  // Finalize already rewrites the stored body to clean prose, but strip any
+  // stray voice tags here too (e.g. a message that errored mid-stream).
+  const lines = stripVoiceTags(content).split("\n");
   const blocks: ReactNode[] = [];
   let i = 0;
   while (i < lines.length) {
@@ -219,6 +222,30 @@ export function createStreamingMarkdown() {
         quote = true;
         atLineStart = false;
         i += text[i + 1] === " " ? 2 : 1;
+      } else if (ch === "[") {
+        // Voice tag [[Name]]…[[/]] — dropped from the visible stream (it only
+        // steers TTS). The whole token may be split across chunks, so defer an
+        // unfinished one the same way a trailing "*" run is deferred.
+        if (text[i + 1] !== "[") {
+          // Not "[[" — could be the start of one arriving next chunk (when it's
+          // the last char), otherwise a stray literal bracket.
+          if (i === text.length - 1) {
+            pending = "[";
+            break;
+          }
+          append(ch, false);
+          atLineStart = false;
+          i++;
+        } else {
+          const close = text.indexOf("]]", i + 2);
+          if (close === -1) {
+            pending = text.slice(i); // tag finishes in a later chunk
+            break;
+          }
+          flushBuf();
+          i = close + 2; // skip the entire [[...]] token
+          atLineStart = false;
+        }
       } else if (/\s/.test(ch)) {
         append(ch, true);
         if (ch === "\n") {
