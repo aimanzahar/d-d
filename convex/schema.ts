@@ -296,6 +296,20 @@ export default defineSchema({
           order: v.number(),
           voiceId: v.string(),
           text: v.string(), // TTS-ready line (tags + markdown already stripped)
+          // Per-line Minimax emotion (docs/adr/0007). Absent = let the model
+          // auto-select from the text. Enum-validated so a bad value can never
+          // reach the gateway.
+          emotion: v.optional(
+            v.union(
+              v.literal("happy"),
+              v.literal("sad"),
+              v.literal("angry"),
+              v.literal("fearful"),
+              v.literal("disgusted"),
+              v.literal("surprised"),
+              v.literal("calm"),
+            ),
+          ),
           audioStatus: v.union(
             v.literal("pending"),
             v.literal("generating"),
@@ -309,6 +323,19 @@ export default defineSchema({
   })
     .index("by_campaign", ["campaignId"])
     .index("by_campaign_unprocessed", ["campaignId", "processed"]),
+
+  // Per-campaign NPC gender memory (docs/adr/0007). Lazily populated: a row is
+  // written the first time the GM tags a speaker's gender, so later mentions that
+  // omit it still pick the right gendered voice pool. The voiceId itself is NOT
+  // stored — it stays a pure function of (name, gender) in gm/voices.ts. NPCs the
+  // GM never genders cost zero rows (consistent already via the name hash).
+  npcGenders: defineTable({
+    campaignId: v.id("campaigns"),
+    nameKey: v.string(), // speaker name, normalized: trim().toLowerCase()
+    gender: v.union(v.literal("male"), v.literal("female"), v.literal("neutral")),
+  })
+    .index("by_campaign", ["campaignId"])
+    .index("by_campaign_name", ["campaignId", "nameKey"]),
 
   combats: defineTable({
     campaignId: v.id("campaigns"),

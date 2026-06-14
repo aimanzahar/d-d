@@ -21,18 +21,16 @@ function ttsUrl(): string {
   return (process.env.LLM_BASE_URL ?? "").replace(/\/v1\/?$/, "") + "/minimax/v1/t2a_v2";
 }
 
-// Map game state to a Minimax emotion + pacing. emotion enum:
-// happy|sad|angry|fearful|disgusted|surprised|neutral|calm. Tunable. Applied
-// uniformly to every segment of a message (docs/adr/0006); per-line emotion is a
-// future upgrade.
-function deriveTone(mode: string, sceneType: string): { emotion: string; speed: number } {
-  if (mode === "combat") return { emotion: "angry", speed: 1.1 }; // urgent, intense
-  if (["tavern", "town", "castle"].includes(sceneType)) return { emotion: "happy", speed: 1.0 };
+// Scene-derived PACING (speed only). Per-line emotion now rides on each segment
+// (GM-tagged, validated, stored at finalize — docs/adr/0007), so the old
+// scene->emotion map is gone; it emitted "neutral"/"calm", and "neutral" isn't a
+// valid speech-2.8 emotion. A segment with no emotion sends none, letting Minimax
+// auto-select from the text.
+function derivePacing(mode: string, sceneType: string): { speed: number } {
+  if (mode === "combat") return { speed: 1.1 }; // urgent, intense
   if (["dungeon", "cave", "swamp", "temple", "forest"].includes(sceneType))
-    return { emotion: "neutral", speed: 0.95 }; // wary
-  if (["ship", "mountain", "field", "road", "camp"].includes(sceneType))
-    return { emotion: "calm", speed: 1.0 };
-  return { emotion: "neutral", speed: 1.0 };
+    return { speed: 0.95 }; // wary
+  return { speed: 1.0 };
 }
 
 // Minimax returns audio as a HEX string (not base64 like the image endpoint).
@@ -50,9 +48,13 @@ async function synthOne(
   ctx: ActionCtx,
   text: string,
   voiceId: string,
-  emotion: string,
   speed: number,
+  emotion?: string,
 ): Promise<Id<"_storage">> {
+  // Omit emotion entirely when absent — Minimax then auto-selects from the text.
+  // Never send "" (not in the enum; the gateway would reject the whole segment).
+  const voice_setting: Record<string, unknown> = { voice_id: voiceId, speed };
+  if (emotion) voice_setting.emotion = emotion;
   const res = await fetch(ttsUrl(), {
     method: "POST",
     headers: {
@@ -62,7 +64,7 @@ async function synthOne(
     body: JSON.stringify({
       model: TTS_MODEL,
       text,
-      voice_setting: { voice_id: voiceId, speed, emotion },
+      voice_setting,
       audio_setting: { sample_rate: 32000, bitrate: 128000, format: "mp3" },
     }),
   });
@@ -160,12 +162,13 @@ export const synthesize = internalAction({
       gmMessageId: args.gmMessageId,
     });
 
-    const { emotion, speed } = deriveTone(input.mode, input.sceneType);
+    const { speed } = derivePacing(input.mode, input.sceneType);
 
     // Sequential: clip 0 lands first so playback can start while the rest
     // synthesize. Order matters; concurrency would only add gateway burst.
     for (const seg of input.segments) {
       if (seg.audioStatus === "done") continue;
+      const emotion = seg.emotion; // per-line; undefined -> Minimax auto-selects
       await ctx.runMutation(internal.gm.tts.markSegmentGenerating, {
         gmMessageId: args.gmMessageId,
         order: seg.order,
@@ -173,15 +176,15 @@ export const synthesize = internalAction({
       try {
         let storageId: Id<"_storage">;
         try {
-          storageId = await synthOne(ctx, seg.text, seg.voiceId, emotion, speed);
+          storageId = await synthOne(ctx, seg.text, seg.voiceId, speed, emotion);
         } catch (error) {
           // Unknown/rejected voice_id (or a transient hiccup): fall back to the
-          // narrator voice so the line is still spoken.
+          // narrator voice so the line is still spoken (same emotion).
           console.error(
             `TTS segment ${seg.order} voice ${seg.voiceId} failed; retrying narrator:`,
             error,
           );
-          storageId = await synthOne(ctx, seg.text, NARRATOR_VOICE, emotion, speed);
+          storageId = await synthOne(ctx, seg.text, NARRATOR_VOICE, speed, emotion);
         }
         await ctx.runMutation(internal.gm.tts.finishSegmentAudio, {
           gmMessageId: args.gmMessageId,

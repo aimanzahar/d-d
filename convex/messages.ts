@@ -6,7 +6,13 @@ import type { Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { requirePlayer } from "./lib/auth";
 import { publicStorageUrl } from "./images";
-import { parseSegments, cleanForDisplay } from "./gm/voices";
+import {
+  parseSegments,
+  cleanForDisplay,
+  voiceForSpeaker,
+  NARRATOR_VOICE,
+  type Gender,
+} from "./gm/voices";
 
 const GM_STALE_MS = 120_000;
 
@@ -253,18 +259,68 @@ export const finalizeGmMessage = internalMutation({
       return;
     }
     // On a completed gm message, split the prose into per-speaker voiced segments
-    // (docs/adr/0006) and rewrite the body to clean prose (voice tags removed)
+    // (docs/adr/0006, 0007) and rewrite the body to clean prose (voice tags removed)
     // for the feed, transcript, and memory. gm/tts.synthesize fills each clip in.
     if (args.status === "complete" && message.kind === "gm") {
-      const segments = parseSegments(message.content).map((s) => ({
-        ...s,
+      const parsed = parseSegments(message.content);
+
+      // Per-campaign gender registry (docs/adr/0007): remembered genders so a later
+      // mention that OMITS gender still picks the right pool. Writes here are race-free
+      // because finalize runs under the per-campaign GM lock (one GM turn at a time).
+      const rows = await ctx.db
+        .query("npcGenders")
+        .withIndex("by_campaign", (q) => q.eq("campaignId", message.campaignId))
+        .collect();
+      const registry = new Map<string, Gender>();
+      for (const r of rows) registry.set(r.nameKey, r.gender);
+
+      // First gender the GM tagged for each name in THIS message (lowest order wins).
+      const tagged = new Map<string, Gender>();
+      for (const s of parsed) {
+        if (!s.name || !s.gender) continue;
+        const key = s.name.trim().toLowerCase();
+        if (!tagged.has(key)) tagged.set(key, s.gender);
+      }
+      // Effective gender = remembered ?? tagged-this-message. Registry is sticky, so a
+      // remembered gender always wins; a genderless first sighting auto-upgrades to the
+      // right gendered voice the first time the GM tags it.
+      const effective = (name: string): Gender | undefined => {
+        const key = name.trim().toLowerCase();
+        return registry.get(key) ?? tagged.get(key);
+      };
+
+      const segments = parsed.map((s) => ({
+        order: s.order,
+        voiceId: s.name === null ? NARRATOR_VOICE : voiceForSpeaker(s.name, effective(s.name)),
+        text: s.text,
+        ...(s.emotion ? { emotion: s.emotion } : {}),
         audioStatus: "pending" as const,
       }));
+
       await ctx.db.patch(args.messageId, {
         status: args.status,
         content: cleanForDisplay(message.content),
         ...(segments.length > 0 ? { audioSegments: segments } : {}),
       });
+
+      // Learn any newly-tagged gender not already remembered (upgrade-once, sticky —
+      // never flip a remembered gender). Defensive unique() check guards the insert.
+      for (const [key, gender] of tagged) {
+        if (registry.has(key)) continue;
+        const existing = await ctx.db
+          .query("npcGenders")
+          .withIndex("by_campaign_name", (q) =>
+            q.eq("campaignId", message.campaignId).eq("nameKey", key),
+          )
+          .unique();
+        if (!existing) {
+          await ctx.db.insert("npcGenders", {
+            campaignId: message.campaignId,
+            nameKey: key,
+            gender,
+          });
+        }
+      }
       return;
     }
     await ctx.db.patch(args.messageId, { status: args.status });
