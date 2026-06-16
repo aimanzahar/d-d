@@ -30,6 +30,7 @@ import type * as lib_battleMaps from "../lib/battleMaps.js";
 import type * as lib_dice from "../lib/dice.js";
 import type * as lib_googleToken from "../lib/googleToken.js";
 import type * as lib_grid from "../lib/grid.js";
+import type * as lib_imageGen from "../lib/imageGen.js";
 import type * as lib_llm from "../lib/llm.js";
 import type * as lib_mapCoords from "../lib/mapCoords.js";
 import type * as lib_password from "../lib/password.js";
@@ -79,6 +80,7 @@ declare const fullApi: ApiFromModules<{
   "lib/dice": typeof lib_dice;
   "lib/googleToken": typeof lib_googleToken;
   "lib/grid": typeof lib_grid;
+  "lib/imageGen": typeof lib_imageGen;
   "lib/llm": typeof lib_llm;
   "lib/mapCoords": typeof lib_mapCoords;
   "lib/password": typeof lib_password;

@@ -1,11 +1,34 @@
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, query } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { requirePlayer } from "./lib/auth";
-import { IMAGE_MODEL } from "./lib/llm";
+import { generateAndStoreImage } from "./lib/imageGen";
 
-const COOLDOWN_MS = 120_000;
-const DAILY_CAP = 24;
+// Skip an auto scene image if one is already generating for the campaign AND it
+// started within this window — coalesces combat's rapid per-creature GM messages,
+// while not letting a hung generation block auto-images for the full watchdog.
+const AUTO_THROTTLE_MS = 60_000;
+
+const SCENE_STYLE =
+  "Epic dark fantasy digital painting, painterly brushwork, dramatic candle-and-comet light, rich color, wide cinematic establishing shot, no text, no watermark, no UI";
+
+// Build the scene-vision prompt from the location + a GM narration beat (+ a fixed
+// style suffix), with a scenery-only fallback for safety rejections.
+function buildSceneImagePrompt(
+  campaign: Doc<"campaigns">,
+  narration: string,
+): { prompt: string; safePrompt: string } {
+  const excerpt = narration
+    .replace(/[*>#_]/g, "")
+    .slice(0, 420)
+    .replace(/\s+\S*$/, "");
+  const prompt = [`${campaign.location.name}: ${campaign.location.description}`, excerpt, SCENE_STYLE]
+    .filter(Boolean)
+    .join(". ");
+  const safePrompt = `A fantasy landscape. ${campaign.location.name}: ${campaign.location.description}. Empty of people, atmospheric scenery only. ${SCENE_STYLE}`;
+  return { prompt, safePrompt };
+}
 
 // Self-hosted CONVEX_CLOUD_ORIGIN is misconfigured (LAN address), so storage
 // URLs are rewritten onto the public proxy origin — verified working.
@@ -19,70 +42,37 @@ export function publicStorageUrl(url: string | null): string | null {
   }
 }
 
-export const requestSceneImage = mutation({
-  args: { sessionToken: v.string(), campaignId: v.id("campaigns") },
+// Auto scene image: fired fire-and-forget after every GM output (gm/turn.ts). No
+// auth / cooldown / daily-cap — the throttle below is the only gate. Builds the
+// prompt from THIS GM message's narration so the image matches the beat just told.
+export const autoSceneImage = internalMutation({
+  args: { campaignId: v.id("campaigns"), gmMessageId: v.id("messages") },
   handler: async (ctx, args) => {
-    const player = await requirePlayer(ctx, args.sessionToken, args.campaignId);
     const campaign = await ctx.db.get(args.campaignId);
-    if (!campaign) throw new ConvexError({ code: "campaign_not_found" });
-
+    if (!campaign) return;
     const recent = await ctx.db
       .query("images")
       .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
       .order("desc")
-      .take(DAILY_CAP);
-    if (recent.some((i) => i.status === "generating")) {
-      throw new ConvexError({ code: "image_in_flight" });
-    }
+      .take(3);
     const now = Date.now();
-    const last = recent[0];
-    if (last && now - last._creationTime < COOLDOWN_MS) {
-      throw new ConvexError({
-        code: "image_cooldown",
-        retryInMs: COOLDOWN_MS - (now - last._creationTime),
-      });
+    if (recent.some((i) => i.status === "generating" && now - i._creationTime < AUTO_THROTTLE_MS)) {
+      return; // one already in flight — coalesce
     }
-    if (recent.filter((i) => now - i._creationTime < 86_400_000).length >= DAILY_CAP) {
-      throw new ConvexError({ code: "image_daily_cap" });
-    }
-
-    // Prompt: scene + the latest GM narration beat + a fixed style suffix
-    const lastGm = (
-      await ctx.db
-        .query("messages")
-        .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
-        .order("desc")
-        .take(12)
-    ).find((m) => m.kind === "gm" && m.status === "complete" && m.content.length > 80);
-    const excerpt = (lastGm?.content ?? "")
-      .replace(/[*>#_]/g, "")
-      .slice(0, 420)
-      .replace(/\s+\S*$/, "");
-    const STYLE =
-      "Epic dark fantasy digital painting, painterly brushwork, dramatic candle-and-comet light, rich color, wide cinematic establishing shot, no text, no watermark, no UI";
-    const prompt = [
-      `${campaign.location.name}: ${campaign.location.description}`,
-      excerpt,
-      STYLE,
-    ]
-      .filter(Boolean)
-      .join(". ");
-    // Scenery-only fallback: combat narration regularly trips safety filters
-    const safePrompt = `A fantasy landscape. ${campaign.location.name}: ${campaign.location.description}. Empty of people, atmospheric scenery only. ${STYLE}`;
-
+    const gm = await ctx.db.get(args.gmMessageId);
+    const { prompt, safePrompt } = buildSceneImagePrompt(campaign, gm?.content ?? "");
     const imageId = await ctx.db.insert("images", {
       campaignId: args.campaignId,
-      requestedByPlayerId: player._id,
+      auto: true,
       prompt,
       safePrompt,
       locationName: campaign.location.name,
       status: "generating",
     });
     await ctx.scheduler.runAfter(0, internal.images.generate, { imageId });
-    // Watchdog: if the generate action dies without reaching finish/fail
-    // (deploy, restart), don't leave "generating" — and its UI banner — stuck.
+    // Watchdog: if the generate action dies without reaching finish/fail (deploy,
+    // restart), don't leave "generating" stuck — it would block later auto-images.
     await ctx.scheduler.runAfter(5 * 60_000, internal.images.failIfStillGenerating, { imageId });
-    return { imageId };
   },
 });
 
@@ -102,41 +92,18 @@ export const generate = internalAction({
     const image = await ctx.runQuery(internal.images.getById, { imageId: args.imageId });
     if (!image) return;
 
-    const attempt = async (prompt: string): Promise<Uint8Array<ArrayBuffer>> => {
-      const res = await fetch(`${process.env.LLM_BASE_URL}/images/generations`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.LLM_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: IMAGE_MODEL,
-          prompt: prompt.slice(0, 980),
-          n: 1,
-          size: "1536x1024",
-          quality: "medium",
-          format: "png",
-        }),
-      });
-      const json = await res.json();
-      const b64 = json.data?.[0]?.b64_json;
-      if (!b64) throw new Error(`no image data: ${JSON.stringify(json).slice(0, 220)}`);
-      return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)) as Uint8Array<ArrayBuffer>;
-    };
-
     try {
-      let bytes: Uint8Array<ArrayBuffer>;
+      let storageId;
       try {
-        bytes = await attempt(image.prompt);
+        storageId = await generateAndStoreImage(ctx, image.prompt, "1536x1024");
       } catch (firstError) {
         // Safety-filter rejections get one scenery-only retry
         if (/safety|rejected|content.?policy/i.test(String(firstError)) && image.safePrompt) {
-          bytes = await attempt(image.safePrompt);
+          storageId = await generateAndStoreImage(ctx, image.safePrompt, "1536x1024");
         } else {
           throw firstError;
         }
       }
-      const storageId = await ctx.storage.store(new Blob([bytes], { type: "image/png" }));
       await ctx.runMutation(internal.images.finish, {
         imageId: args.imageId,
         storageId,

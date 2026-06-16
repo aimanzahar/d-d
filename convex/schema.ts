@@ -454,7 +454,10 @@ export default defineSchema({
 
   images: defineTable({
     campaignId: v.id("campaigns"),
-    requestedByPlayerId: v.id("players"),
+    // Absent for auto-generated scene images (one per GM turn, docs/adr none —
+    // see convex/images.ts autoSceneImage); present for any manual/player request.
+    requestedByPlayerId: v.optional(v.id("players")),
+    auto: v.optional(v.boolean()), // true = fired automatically after a GM output
     prompt: v.string(),
     safePrompt: v.optional(v.string()), // scenery-only fallback for safety rejections
     locationName: v.string(),

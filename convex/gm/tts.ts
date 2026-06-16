@@ -2,7 +2,7 @@
 // the prose into ordered voiced segments (narrator + tagged NPC dialogue, see
 // gm/voices.ts + docs/adr/0006) and this fire-and-forget action synthesizes each
 // segment to its own clip via Minimax speech-2.8-turbo (OpenAI-compatible gateway, same
-// key as grok/gpt-image-2), stores the mp3 in Convex storage, and attaches it to
+// key as grok/qwen-image), stores the mp3 in Convex storage, and attaches it to
 // the segment. Non-fatal: the turn has already succeeded — TTS failure only drops
 // that clip; the client plays whatever clips are ready, in order.
 

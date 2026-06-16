@@ -1,7 +1,6 @@
 "use client";
 
 import { useMutation, useQuery } from "convex/react";
-import { ConvexError } from "convex/values";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/convex/_generated/api";
 import { useSession } from "@/hooks/useSession";
@@ -14,12 +13,10 @@ const DOWN_CONDITIONS = ["dead", "unconscious", "stable"];
 export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
   const session = useSession();
   const send = useMutation(api.messages.sendPlayerAction);
-  const requestImage = useMutation(api.images.requestSceneImage);
   const { onKeystroke, stopTyping, typers } = useTyping();
   const [text, setText] = useState("");
   const [ooc, setOoc] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [imageNote, setImageNote] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Live state that decides whether the player may take an ACTION right now.
@@ -68,34 +65,6 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
     campaignId: session.campaignId,
   });
   const forming = latest?.status === "generating";
-  const prevStatus = useRef<string | null>(null);
-  useEffect(() => {
-    if (prevStatus.current === "generating" && latest?.status === "failed") {
-      setImageNote("The vision slipped away.");
-      setTimeout(() => setImageNote(null), 5000);
-    }
-    prevStatus.current = latest?.status ?? null;
-  }, [latest?.status]);
-
-  async function handleVisualize() {
-    setImageNote(null);
-    try {
-      await requestImage({ sessionToken: session.sessionToken, campaignId: session.campaignId });
-      // success: the reactive `forming` line takes over
-    } catch (e) {
-      const code = e instanceof ConvexError ? (e.data as { code?: string })?.code : null;
-      setImageNote(
-        code === "image_cooldown"
-          ? "The scrying pool needs a moment — try again shortly."
-          : code === "image_in_flight"
-            ? "A vision is already forming."
-            : code === "image_daily_cap"
-              ? "The scrying pool has run dry for today."
-              : "The vision slipped away.",
-      );
-      setTimeout(() => setImageNote(null), 5000);
-    }
-  }
 
   async function handleSend() {
     const content = text.trim();
@@ -135,9 +104,6 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
         <p className="font-narrative italic text-xs text-arcane-soft mb-2 animate-flicker">
           The vision is forming…
         </p>
-      )}
-      {!forming && imageNote && (
-        <p className="font-narrative italic text-xs text-arcane-soft mb-2">{imageNote}</p>
       )}
       {forcedOoc && (
         <p className="font-narrative italic text-xs text-blood/90 mb-2">
@@ -202,13 +168,6 @@ export function ActionInput({ gmThinking }: { gmThinking: boolean }) {
               }
             >
               {effectiveOoc ? "table talk" : "action"}
-            </button>
-            <button
-              className="font-display text-[0.55rem] tracking-[0.2em] uppercase px-2 py-1 border border-arcane/40 text-arcane-soft hover:border-arcane cursor-pointer"
-              onClick={handleVisualize}
-              title="Conjure an image of the current scene"
-            >
-              ✦ visualize
             </button>
           </div>
           <Button variant="ember" size="md" disabled={busy || !text.trim()} onClick={handleSend}>

@@ -287,6 +287,13 @@ export const respond = internalAction({
           campaignId: args.campaignId,
           gmMessageId,
         });
+        // Fire-and-forget scene image for this beat — auto-gen replaces the old
+        // manual "visualize" button. Throttled inside autoSceneImage so combat's
+        // rapid per-creature messages coalesce. Non-blocking; failure drops the image.
+        await ctx.scheduler.runAfter(0, internal.images.autoSceneImage, {
+          campaignId: args.campaignId,
+          gmMessageId,
+        });
       }
 
       const next = await ctx.runMutation(internal.gm.turn.finishTurn, args);

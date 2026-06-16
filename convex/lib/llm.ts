@@ -4,7 +4,9 @@
 export const GM_MODEL = "grok-4.3";
 export const EMBEDDING_MODEL = "gemini-embedding-2-preview";
 export const EMBEDDING_DIM = 3072;
-export const IMAGE_MODEL = "gpt-image-2";
+// qwen-image-2.0 (accelerated): ~7s vs gpt-image-2's ~48s at
+// 1536x1024 on this gateway. Returns data[0].url (not b64) — see lib/imageGen.ts.
+export const IMAGE_MODEL = "qwen-image-2.0-2026-03-03";
 
 // Gateway model limits: grok-4.3 has a large (500K-class) context window;
 // output is capped at 15K (plenty for narration and structured side-channels).

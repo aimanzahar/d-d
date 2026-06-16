@@ -8,7 +8,7 @@ import { internal } from "./_generated/api";
 import { internalAction, internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireHost, requirePlayer } from "./lib/auth";
-import { IMAGE_MODEL } from "./lib/llm";
+import { generateAndStoreImage } from "./lib/imageGen";
 import { publicStorageUrl } from "./images";
 
 const MAP_STYLE =
@@ -72,26 +72,7 @@ export const generate = internalAction({
   args: { campaignId: v.id("campaigns"), prompt: v.string() },
   handler: async (ctx, args) => {
     try {
-      const res = await fetch(`${process.env.LLM_BASE_URL}/images/generations`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.LLM_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: IMAGE_MODEL,
-          prompt: args.prompt.slice(0, 980),
-          n: 1,
-          size: "1536x1024",
-          quality: "medium",
-          format: "png",
-        }),
-      });
-      const json = await res.json();
-      const b64 = json.data?.[0]?.b64_json;
-      if (!b64) throw new Error(`no image data: ${JSON.stringify(json).slice(0, 220)}`);
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)) as Uint8Array<ArrayBuffer>;
-      const storageId = await ctx.storage.store(new Blob([bytes], { type: "image/png" }));
+      const storageId = await generateAndStoreImage(ctx, args.prompt, "1536x1024");
       await ctx.runMutation(internal.regionMap.finishMap, {
         campaignId: args.campaignId,
         storageId,

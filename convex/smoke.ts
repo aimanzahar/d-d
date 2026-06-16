@@ -1,5 +1,6 @@
 import { internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
+import { generateAndStoreImage } from "./lib/imageGen";
 
 // Phase 0 smoke test: validates every external integration from inside the
 // Convex V8 runtime (the same runtime the GM loop will run in).
@@ -166,33 +167,15 @@ export const run = internalAction({
       results.storage = { ok: false, error: String(e) };
     }
 
-    // 5. gpt-image-2 generation → storage (full image pipeline)
+    // 5. image generation → storage (full pipeline, IMAGE_MODEL = qwen via helper)
     try {
-      const res = await fetch(`${base}/images/generations`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${key}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-image-2",
-          prompt: "A tiny red twenty-sided die resting on aged parchment, warm candlelight, simple still life",
-          n: 1,
-          size: "1024x1024",
-          quality: "low",
-          format: "webp",
-        }),
-      });
-      const json = await res.json();
-      const b64 = json.data?.[0]?.b64_json;
-      if (!b64) {
-        results.image = { ok: false, status: res.status, body: JSON.stringify(json).slice(0, 400) };
-      } else {
-        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-        const storageId = await ctx.storage.store(new Blob([bytes], { type: "image/webp" }));
-        const url = await ctx.storage.getUrl(storageId);
-        results.image = { ok: !!url, bytes: bytes.length, storageId, url };
-      }
+      const storageId = await generateAndStoreImage(
+        ctx,
+        "A tiny red twenty-sided die resting on aged parchment, warm candlelight, simple still life",
+        "1024x1024",
+      );
+      const url = await ctx.storage.getUrl(storageId);
+      results.image = { ok: !!url, storageId, url };
     } catch (e) {
       results.image = { ok: false, error: String(e) };
     }
