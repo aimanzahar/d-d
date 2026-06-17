@@ -16,6 +16,7 @@ import type * as codex from "../codex.js";
 import type * as combat from "../combat.js";
 import type * as crons from "../crons.js";
 import type * as dice from "../dice.js";
+import type * as gm_checkDetect from "../gm/checkDetect.js";
 import type * as gm_context from "../gm/context.js";
 import type * as gm_memory from "../gm/memory.js";
 import type * as gm_prompt from "../gm/prompt.js";
@@ -66,6 +67,7 @@ declare const fullApi: ApiFromModules<{
   combat: typeof combat;
   crons: typeof crons;
   dice: typeof dice;
+  "gm/checkDetect": typeof gm_checkDetect;
   "gm/context": typeof gm_context;
   "gm/memory": typeof gm_memory;
   "gm/prompt": typeof gm_prompt;

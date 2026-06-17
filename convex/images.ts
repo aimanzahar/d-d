@@ -23,10 +23,15 @@ function buildSceneImagePrompt(
     .replace(/[*>#_]/g, "")
     .slice(0, 420)
     .replace(/\s+\S*$/, "");
-  const prompt = [`${campaign.location.name}: ${campaign.location.description}`, excerpt, SCENE_STYLE]
-    .filter(Boolean)
-    .join(". ");
-  const safePrompt = `A fantasy landscape. ${campaign.location.name}: ${campaign.location.description}. Empty of people, atmospheric scenery only. ${SCENE_STYLE}`;
+  // LEAD with this beat's narration — the freshest, most specific scene signal — so the
+  // image tracks the action even if the GM's change_location lags a turn. The location
+  // name + sceneType ride along as lighter setting context. (Previously the prompt led
+  // with the location's long description, which anchored EVERY image to the scene last
+  // set via change_location — so an untravelled location froze the visuals on the
+  // starting tavern.) The scenery-only safePrompt keys off sceneType for the same reason.
+  const setting = `Setting: ${campaign.location.name}, a ${campaign.location.sceneType} scene`;
+  const prompt = [excerpt, setting, SCENE_STYLE].filter(Boolean).join(". ");
+  const safePrompt = `A fantasy ${campaign.location.sceneType} landscape, atmospheric scenery only, empty of people. ${SCENE_STYLE}`;
   return { prompt, safePrompt };
 }
 

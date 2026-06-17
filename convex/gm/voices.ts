@@ -98,11 +98,50 @@ function hashStr(s: string): number {
   return h >>> 0;
 }
 
+// The single canonical speaker key: lowercase, internal whitespace collapsed, ends
+// trimmed. EVERY consumer (voice hash, gender registry reads/writes) MUST key off
+// this so "Barkeep", "  barkeep " and "the  barkeep" never split into two voices.
+export function normalizeName(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 export function voiceForSpeaker(name: string, gender?: Gender): string {
-  const key = name.trim().toLowerCase();
+  const key = normalizeName(name);
   if (!key) return NARRATOR_VOICE;
   const pool = gender === "male" ? MALE_POOL : gender === "female" ? FEMALE_POOL : COMBINED_POOL;
   return pool[hashStr(key) % pool.length];
+}
+
+// Prose-based gender fallback (docs/adr/0007). The GM is told to tag |gender on a
+// speaker's first line, but it often forgets; an untagged speaker would otherwise be
+// hashed into the mixed pool — a coin flip that gives a narrated woman a male voice.
+// When gender is unknown we scan the speaker's name plus the narration immediately
+// adjacent to their line for gendered words/pronouns and pick the clear winner.
+// Word-boundary + case-insensitive so "the" never matches "he", "there" never "her".
+const FEMALE_WORDS = [
+  "she", "her", "hers", "herself", "woman", "women", "girl", "lady", "ladies",
+  "madam", "maiden", "queen", "princess", "duchess", "countess", "mistress", "dame",
+  "barmaid", "priestess", "nun", "mother", "sister", "daughter", "wife", "widow",
+  "aunt", "niece", "grandmother", "crone", "matron", "witch",
+];
+const MALE_WORDS = [
+  "he", "him", "his", "himself", "man", "men", "boy", "lad", "gentleman", "sir",
+  "lord", "king", "prince", "duke", "count", "master", "monk", "priest", "friar",
+  "brother", "son", "husband", "uncle", "nephew", "grandfather", "fellow",
+];
+const FEMALE_RE = new RegExp(`\\b(?:${FEMALE_WORDS.join("|")})\\b`, "gi");
+const MALE_RE = new RegExp(`\\b(?:${MALE_WORDS.join("|")})\\b`, "gi");
+
+// Returns the dominant gender across name + adjacent narration, or undefined on a tie
+// or no signal (so the caller falls back to the mixed pool — never worse than today).
+// Only male/female are inferred; "neutral" stays an explicit GM choice.
+export function inferGender(name: string, context = ""): Gender | undefined {
+  const hay = `${name} ${context}`;
+  const f = (hay.match(FEMALE_RE) ?? []).length;
+  const m = (hay.match(MALE_RE) ?? []).length;
+  if (f > m) return "female";
+  if (m > f) return "male";
+  return undefined;
 }
 
 // Parse a tag's inner string ("Name|tok|tok…") into a speaker. First field is the

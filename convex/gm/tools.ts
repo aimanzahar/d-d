@@ -154,7 +154,8 @@ export const TOOL_DEFS: ToolDef[] = [
     type: "function",
     function: {
       name: "change_location",
-      description: "Move the party to a new location. Drives the visual scene — choose the closest sceneType.",
+      description:
+        "Move the party to a new place. Call this BEFORE narrating whenever they travel somewhere meaningfully different (new building, room, street, road, or wilderness). It is the ONLY thing that updates the auto-generated scene image and the 'you are here' map marker — narration alone leaves the visuals frozen on the previous place. Pick the closest sceneType.",
       parameters: {
         type: "object",
         properties: {

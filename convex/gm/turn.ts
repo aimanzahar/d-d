@@ -13,6 +13,7 @@ import {
   type ToolCall,
 } from "../lib/llm";
 import { search } from "../lib/qdrant";
+import { narrationRequestsCheck } from "./checkDetect";
 import { BASE_PROMPT, COMBAT_ADDENDUM, EXPLORATION_ADDENDUM } from "./prompt";
 import { dispatchTool, TOOL_DEFS } from "./tools";
 
@@ -140,6 +141,7 @@ export const respond = internalAction({
       // with no prose creates no message at all.
       const isCombat = context.mode === "combat";
       let buffer = "";
+      let narration = ""; // full streamed prose this turn — scanned for prose-only checks
       let lastFlush = Date.now();
       const ensureMessage = async () => {
         if (gmMessageId === null) {
@@ -169,6 +171,7 @@ export const respond = internalAction({
       const maxIterations = isCombat ? 10 : MAX_ITERATIONS;
       const onText = async (delta: string) => {
         buffer += delta;
+        narration += delta;
         // trim: a bare "\n" alongside a tool call is not narration
         streamedChars += delta.trim().length;
         // In combat, defer flushing until after the iteration's tools have run
@@ -237,6 +240,44 @@ export const respond = internalAction({
             "(Your previous reply contained no narration text. Respond now with in-world narration for the player. Do not call tools.)",
         });
         await chatStream({ messages: transcript, maxTokens: GM_MAX_TOKENS, onText });
+      }
+
+      // Self-healing check net: the model sometimes DESCRIBES a required check in
+      // prose ("Ren needs to attempt a Deception check") but forgets to call
+      // request_player_roll, so no pending roll is created and no "Roll!" button
+      // ever reaches the player. If the narration asked for a check yet no player
+      // roll was requested this turn, nudge once — with tools — so the structured
+      // call (and the button) actually happens. endTurn is true iff a
+      // request_player_roll already succeeded, so this only fires when one didn't.
+      const withinDeadline = Date.now() - startedAt <= TURN_DEADLINE_MS;
+      if (!endTurn && withinDeadline && streamedChars > 0 && narrationRequestsCheck(narration)) {
+        // Restore role alternation if the loop broke before pushing the assistant
+        // turn (same reason as the no-narration retry above).
+        if (result && (result.finishReason !== "tool_calls" || result.toolCalls.length === 0)) {
+          transcript.push({ role: "assistant", content: result.content || narration });
+        }
+        transcript.push({
+          role: "user",
+          content:
+            "(Your narration called for a dice check but you did not call request_player_roll, so no roll prompt reached the player. If a PLAYER character must roll, call request_player_roll now with the correct characterName, rollType, skill/ability, and dc — then stop, adding no new narration. If no roll is actually needed, reply with an empty message.)",
+        });
+        const fix = await chatStream({
+          messages: transcript,
+          tools: TOOL_DEFS,
+          maxTokens: GM_MAX_TOKENS,
+          onText,
+        });
+        for (const call of fix.toolCalls) {
+          const toolResult = await executeCall(ctx, args.campaignId, call, errorBudget);
+          transcript.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: JSON.stringify(toolResult),
+          });
+          if (call.function.name === "request_player_roll" && (toolResult as any)?.ok === true) {
+            endTurn = true; // a roll prompt is now up — wait for the player's dice
+          }
+        }
       }
 
       await flush(true);

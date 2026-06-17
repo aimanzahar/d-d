@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   parseSegments,
   voiceForSpeaker,
+  normalizeName,
+  inferGender,
   MALE_POOL,
   FEMALE_POOL,
   EMOTION_ENUM,
@@ -195,5 +197,49 @@ describe("voiceForSpeaker — gendered pools, deterministic", () => {
   it("never returns the narrator voice for a named speaker", () => {
     expect(voiceForSpeaker("Borin", "male")).not.toBe(NARRATOR_VOICE);
     expect(voiceForSpeaker("Maela", "female")).not.toBe(NARRATOR_VOICE);
+  });
+});
+
+describe("normalizeName — one canonical key", () => {
+  it("lowercases, trims, and collapses internal whitespace", () => {
+    expect(normalizeName("Barkeep")).toBe("barkeep");
+    expect(normalizeName("  barkeep ")).toBe("barkeep");
+    expect(normalizeName("The  Barkeep")).toBe("the barkeep");
+    expect(normalizeName("Sir\tRobert\nthe  Bold")).toBe("sir robert the bold");
+  });
+
+  it("gives the same voice regardless of spacing (the divergent-voice bug)", () => {
+    expect(voiceForSpeaker("Sir Robert", "male")).toBe(voiceForSpeaker("Sir  Robert ", "male"));
+  });
+});
+
+describe("inferGender — prose-based fallback", () => {
+  it("infers female from she/her/woman cues (the barkeep case)", () => {
+    expect(
+      inferGender("Barkeep", "a wiry woman jerks her chin toward the shelf. she says, voice low."),
+    ).toBe("female");
+  });
+
+  it("infers male from he/him/sir cues", () => {
+    expect(inferGender("Watchman", "the guard draws his cudgel; he barks at the half-elf, sir.")).toBe(
+      "male",
+    );
+  });
+
+  it("reads a gendered word in the speaker's own name", () => {
+    expect(inferGender("Lady Maela", "")).toBe("female");
+    expect(inferGender("Lord Borin", "")).toBe("male");
+  });
+
+  it("returns undefined with no signal (falls back to the mixed pool)", () => {
+    expect(inferGender("Hooded Stranger", "the figure slides a notice across the table.")).toBeUndefined();
+  });
+
+  it("returns undefined on a tie so a wrong guess never wins", () => {
+    expect(inferGender("Twins", "he and she speak as one.")).toBeUndefined();
+  });
+
+  it("does not match substrings (the/there must not read as he/her)", () => {
+    expect(inferGender("Voice", "there is something in the air over there.")).toBeUndefined();
   });
 });

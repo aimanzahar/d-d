@@ -325,14 +325,18 @@ export default defineSchema({
     .index("by_campaign_unprocessed", ["campaignId", "processed"]),
 
   // Per-campaign NPC gender memory (docs/adr/0007). Lazily populated: a row is
-  // written the first time the GM tags a speaker's gender, so later mentions that
+  // written the first time we learn a speaker's gender, so later mentions that
   // omit it still pick the right gendered voice pool. The voiceId itself is NOT
-  // stored — it stays a pure function of (name, gender) in gm/voices.ts. NPCs the
-  // GM never genders cost zero rows (consistent already via the name hash).
+  // stored — it stays a pure function of (name, gender) in gm/voices.ts. NPCs whose
+  // gender we never learn cost zero rows (consistent already via the name hash).
   npcGenders: defineTable({
     campaignId: v.id("campaigns"),
-    nameKey: v.string(), // speaker name, normalized: trim().toLowerCase()
+    nameKey: v.string(), // speaker name, normalized via normalizeName() in gm/voices.ts
     gender: v.union(v.literal("male"), v.literal("female"), v.literal("neutral")),
+    // How we learned it: a GM-"tagged" value is authoritative and sticky; an
+    // "inferred" value is a prose-based guess an explicit tag may later correct.
+    // Optional for back-compat: a row without it is treated as "tagged".
+    source: v.optional(v.union(v.literal("tagged"), v.literal("inferred"))),
   })
     .index("by_campaign", ["campaignId"])
     .index("by_campaign_name", ["campaignId", "nameKey"]),

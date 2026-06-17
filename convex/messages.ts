@@ -10,6 +10,8 @@ import {
   parseSegments,
   cleanForDisplay,
   voiceForSpeaker,
+  normalizeName,
+  inferGender,
   NARRATOR_VOICE,
   type Gender,
 } from "./gm/voices";
@@ -267,26 +269,57 @@ export const finalizeGmMessage = internalMutation({
       // Per-campaign gender registry (docs/adr/0007): remembered genders so a later
       // mention that OMITS gender still picks the right pool. Writes here are race-free
       // because finalize runs under the per-campaign GM lock (one GM turn at a time).
+      // Each row remembers WHY we know the gender: a GM "tagged" value is authoritative
+      // and sticky; an "inferred" value is a prose-based guess an explicit tag may later
+      // correct. Rows written before this field existed are treated as "tagged".
       const rows = await ctx.db
         .query("npcGenders")
         .withIndex("by_campaign", (q) => q.eq("campaignId", message.campaignId))
         .collect();
-      const registry = new Map<string, Gender>();
-      for (const r of rows) registry.set(r.nameKey, r.gender);
+      const remembered = new Map<string, { gender: Gender; source: "tagged" | "inferred" }>();
+      for (const r of rows) remembered.set(r.nameKey, { gender: r.gender, source: r.source ?? "tagged" });
 
       // First gender the GM tagged for each name in THIS message (lowest order wins).
       const tagged = new Map<string, Gender>();
       for (const s of parsed) {
         if (!s.name || !s.gender) continue;
-        const key = s.name.trim().toLowerCase();
+        const key = normalizeName(s.name);
         if (!tagged.has(key)) tagged.set(key, s.gender);
       }
-      // Effective gender = remembered ?? tagged-this-message. Registry is sticky, so a
-      // remembered gender always wins; a genderless first sighting auto-upgrades to the
-      // right gendered voice the first time the GM tags it.
+
+      // Prose-inferred gender for speakers this message left ungendered (and that we
+      // don't already remember). We only look at the narrator text IMMEDIATELY adjacent
+      // to a speaker's segments, so a different speaker's pronouns elsewhere in the
+      // message can't bleed in. Signals from every occurrence are pooled together.
+      const adjacency = new Map<string, string[]>();
+      for (let i = 0; i < parsed.length; i++) {
+        const s = parsed[i];
+        if (!s.name) continue;
+        const key = normalizeName(s.name);
+        if (tagged.has(key) || remembered.has(key)) continue;
+        const chunks = adjacency.get(key) ?? [];
+        const prev = parsed[i - 1];
+        const next = parsed[i + 1];
+        if (prev && prev.name === null) chunks.push(prev.text);
+        if (next && next.name === null) chunks.push(next.text);
+        adjacency.set(key, chunks);
+      }
+      const inferred = new Map<string, Gender>();
+      for (const [key, chunks] of adjacency) {
+        const g = inferGender(key, chunks.join(" "));
+        if (g) inferred.set(key, g);
+      }
+
+      // Effective gender precedence: remembered TAGGED (sticky/authoritative) > this
+      // message's GM tag (which also corrects a remembered guess) > remembered INFERRED
+      // > this message's inference > undefined (mixed pool).
       const effective = (name: string): Gender | undefined => {
-        const key = name.trim().toLowerCase();
-        return registry.get(key) ?? tagged.get(key);
+        const key = normalizeName(name);
+        const rem = remembered.get(key);
+        if (rem?.source === "tagged") return rem.gender;
+        if (tagged.has(key)) return tagged.get(key);
+        if (rem?.source === "inferred") return rem.gender;
+        return inferred.get(key);
       };
 
       const segments = parsed.map((s) => ({
@@ -303,10 +336,11 @@ export const finalizeGmMessage = internalMutation({
         ...(segments.length > 0 ? { audioSegments: segments } : {}),
       });
 
-      // Learn any newly-tagged gender not already remembered (upgrade-once, sticky —
-      // never flip a remembered gender). Defensive unique() check guards the insert.
+      // Persist a GM tag (authoritative): insert if new, or UPGRADE a prior inferred
+      // guess to the tagged value. Never flip an existing tagged row. unique() guards.
       for (const [key, gender] of tagged) {
-        if (registry.has(key)) continue;
+        const rem = remembered.get(key);
+        if (rem?.source === "tagged") continue;
         const existing = await ctx.db
           .query("npcGenders")
           .withIndex("by_campaign_name", (q) =>
@@ -318,6 +352,29 @@ export const finalizeGmMessage = internalMutation({
             campaignId: message.campaignId,
             nameKey: key,
             gender,
+            source: "tagged",
+          });
+        } else if ((existing.source ?? "tagged") !== "tagged" || existing.gender !== gender) {
+          await ctx.db.patch(existing._id, { gender, source: "tagged" });
+        }
+      }
+      // Persist an inferred guess only when nothing is remembered yet, so the voice
+      // stays consistent across later turns that omit pronouns. An explicit tag in a
+      // future turn corrects it via the upgrade path above.
+      for (const [key, gender] of inferred) {
+        if (remembered.has(key) || tagged.has(key)) continue;
+        const existing = await ctx.db
+          .query("npcGenders")
+          .withIndex("by_campaign_name", (q) =>
+            q.eq("campaignId", message.campaignId).eq("nameKey", key),
+          )
+          .unique();
+        if (!existing) {
+          await ctx.db.insert("npcGenders", {
+            campaignId: message.campaignId,
+            nameKey: key,
+            gender,
+            source: "inferred",
           });
         }
       }
